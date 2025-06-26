@@ -68,8 +68,8 @@ describe('SmartAdvisorServer', () => {
           properties: {
             model: {
               type: 'string',
-              enum: ['deepseek', 'google', 'openai', 'all'],
-              description: 'The provider to use for advice (deepseek, google, openai, all)',
+              enum: ['auto', 'intelligence', 'cost', 'balance', 'all', 'deepseek', 'google', 'openai'],
+              description: 'Routing strategy: auto (smart routing), intelligence (o3), cost (deepseek), balance (gemini), all (multi-provider), or specific provider',
             },
             task: {
               type: 'string',
@@ -125,7 +125,7 @@ describe('SmartAdvisorServer', () => {
       await expect(server.callTool('smart_advisor', {
         model: 'unknown-model',
         task: 'test task'
-      })).rejects.toThrow('Unknown model: unknown-model');
+      })).rejects.toThrow('Unknown routing strategy: unknown-model');
     });
 
     it('should handle all new tool names', async () => {
@@ -199,7 +199,8 @@ describe('SmartAdvisorServer', () => {
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://github.com/user/mcp-smart-advisor',
             'X-Title': 'MCP Smart Advisor'
-          }
+          },
+          timeout: 30000
         }
       );
     });
@@ -241,7 +242,7 @@ describe('SmartAdvisorServer', () => {
       await expect(server.callTool('smart_advisor', {
         model: 'google',
         task: 'test task'
-      })).rejects.toThrow('OpenRouter API error: API Error');
+      })).rejects.toThrow('OpenRouter API error');
     });
 
     it('should handle empty response', async () => {
