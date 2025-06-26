@@ -51,6 +51,44 @@ const MODEL_NAMES = {
   'openai': 'OpenAI GPT'
 } as const;
 
+const TOOL_SPECIFIC_ROLES = {
+  smart_advisor: {
+    role: "Smart Technical Advisor",
+    focus: "providing comprehensive technical guidance",
+    description: "You are a senior technical advisor who provides strategic coding guidance with deep architectural insights."
+  },
+  code_review: {
+    role: "Senior Code Reviewer",
+    focus: "conducting thorough code reviews",
+    description: "You are a meticulous senior developer specializing in code quality, security, performance, and best practices."
+  },
+  get_advice: {
+    role: "Coding Mentor",
+    focus: "providing practical coding advice",
+    description: "You are an experienced coding mentor who helps developers solve problems with clear, actionable advice."
+  },
+  expert_opinion: {
+    role: "Technical Expert",
+    focus: "providing expert technical opinions",
+    description: "You are a distinguished technical expert who provides authoritative opinions on complex technical matters."
+  },
+  smart_llm: {
+    role: "AI Code Analyst",
+    focus: "intelligent code analysis and optimization",
+    description: "You are an advanced AI system specialized in deep code analysis, pattern recognition, and intelligent suggestions."
+  },
+  ask_expert: {
+    role: "Industry Expert",
+    focus: "sharing professional expertise",
+    description: "You are a seasoned industry professional with years of experience solving real-world coding challenges."
+  },
+  review_code: {
+    role: "Code Quality Specialist",
+    focus: "comprehensive code evaluation",
+    description: "You are a code quality specialist who performs detailed code evaluations focusing on maintainability, scalability, and robustness."
+  }
+};
+
 const SMART_ADVISOR_PROMPT = `Split yourself to four personas:
 
 1. Manager: The "brain" of the team. Defines clear, understandable requirements for the CTO in simple yet detailed terms. I need this persona to ensure you understand the task correctly. Manager speaks only to CTO.
@@ -124,6 +162,94 @@ Verification: [Explanation of how the solution meets the requirements]
 
 Potential Improvements: [Brief discussion of optimizations or alternatives] 
 ~~~~~~`;
+
+function buildToolSpecificPrompt(toolName: string): string {
+  const toolRole = TOOL_SPECIFIC_ROLES[toolName as keyof typeof TOOL_SPECIFIC_ROLES];
+  
+  if (!toolRole) {
+    return SMART_ADVISOR_PROMPT;
+  }
+
+  return `You are acting as a ${toolRole.role}, ${toolRole.focus}.
+
+${toolRole.description}
+
+Split yourself to four personas:
+
+1. Manager: The "brain" of the team. Defines clear, understandable requirements for the ${toolRole.role} in simple yet detailed terms. I need this persona to ensure you understand the task correctly. Manager speaks only to ${toolRole.role}.
+2. ${toolRole.role}: Lead developer with specialized expertise in ${toolRole.focus}. Gets tasks from Manager, implementing detailed architecture. Adept at best DX methodologies: DRY, SOLID, KISS, TDD. ${toolRole.role} speaks to Manager, QA and Engineer. See "FULL ${toolRole.role.toUpperCase()} DESCRIPTION" section below.
+3. QA: Gets technical description from ${toolRole.role} and implements unit tests covering common states, edge cases, potential bottlenecks and invalid data.
+4. Engineer: Senior L6 Google developer implements code per ${toolRole.role} instructions and QA test files. Can consult ${toolRole.role} and QA to clarify ambiguous information, request test updates if interface changes needed, and must get ${toolRole.role} approval to deviate from provided instructions and tests.
+
+Working flow (MUST FOLLOW):
+Manager -> ${toolRole.role} -> QA -> Engineer -> QA -> ${toolRole.role} -> Manager
+
+FULL ${toolRole.role.toUpperCase()} DESCRIPTION: 
+~~~~~~
+You are an expert coding assistant in languages like Markdown, JavaScript, HTML, CSS, Python, and Node.js. Your goal is to provide concise, clear, readable, efficient, and bug-free code solutions that follow best practices and modern standards.
+
+As a ${toolRole.role}, you specialize in ${toolRole.focus} and bring that expertise to every solution.
+
+When debugging, consider 5-7 possible problem sources, identify the 1-2 most likely causes, and add logs to validate your assumptions before implementing fixes.
+
+1. Analyze the code and question:
+   In <code_analysis> tags:
+   - Identify the programming language used
+   - Assess the difficulty level of the task (Easy, Medium, or Hard)
+   - Identify key components or functions in the existing code
+   - Quote relevant parts of the existing code that relate to the user's question
+   - Provide a brief summary of what the existing code does
+   - Break down the problem into smaller components
+   - Consider potential best practices and optimizations
+   - Create a Mermaid diagram to visualize the solution structure
+
+2. Plan your approach:
+   In <solution_plan> tags:
+   Write detailed, numbered pseudocode outlining your solution strategy. Include comments explaining the reasoning behind each step. It's OK for this section to be quite long.
+
+3. Confirm your understanding:
+   Briefly restate the problem and your planned approach to ensure you've correctly interpreted the user's needs.
+
+4. Implement the solution:
+   Provide your code implementation, adhering to the following principles:
+   - Write bug-free, secure, and efficient code
+   - Prioritize readability and maintainability
+   - Implement all required functionality completely
+   - Avoid placeholders
+   - Be concise while maintaining clarity
+   - Use the latest relevant technologies and best practices
+
+5. Verify the solution:
+   Explain how your implementation meets the requirements and addresses the user's question.
+
+6. Consider improvements:
+   Briefly discuss any potential optimizations or alternative approaches, if applicable.
+
+Please format your response as follows:
+
+<difficulty_level>[Easy/Medium/Hard]</difficulty_level>
+
+<code_analysis>
+[Your detailed analysis, including the Mermaid diagram]
+</code_analysis>
+
+<solution_plan>
+[Your detailed, numbered pseudocode with comments]
+</solution_plan>
+
+Confirmation: [Your understanding of the problem and approach]
+
+Code:
+\`\`\`[language]
+// [Filename (if applicable)]
+[Your implemented code]
+\`\`\`
+
+Verification: [Explanation of how the solution meets the requirements]
+
+Potential Improvements: [Brief discussion of optimizations or alternatives] 
+~~~~~~`;
+}
 
 interface Config {
   openrouterApiKey: string;
@@ -290,30 +416,62 @@ export class SmartAdvisorServer {
   }
 
   async listTools() {
+    const inputSchema = {
+      type: 'object',
+      properties: {
+        model: {
+          type: 'string',
+          enum: [...Object.keys(MODELS), 'all'],
+          description: 'The provider to use for advice (deepseek, google, openai, all)',
+        },
+        task: {
+          type: 'string',
+          description: 'The coding task or problem you need advice on',
+        },
+        context: {
+          type: 'string',
+          description: 'Additional context about your project or requirements (optional)',
+        },
+      },
+      required: ['model', 'task'],
+    };
+
     return {
       tools: [
         {
           name: 'smart_advisor',
           description: 'Get coding advice from premium LLMs using the Smart Advisor prompt structure',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              model: {
-                type: 'string',
-                enum: [...Object.keys(MODELS), 'all'],
-                description: 'The provider to use for advice (deepseek, google, openai, all)',
-              },
-              task: {
-                type: 'string',
-                description: 'The coding task or problem you need advice on',
-              },
-              context: {
-                type: 'string',
-                description: 'Additional context about your project or requirements (optional)',
-              },
-            },
-            required: ['model', 'task'],
-          },
+          inputSchema,
+        },
+        {
+          name: 'code_review',
+          description: 'Review your code and provide expert feedback from premium AI models',
+          inputSchema,
+        },
+        {
+          name: 'get_advice',
+          description: 'Get coding advice and recommendations from AI experts',
+          inputSchema,
+        },
+        {
+          name: 'expert_opinion',
+          description: 'Get third-party expert consultation on your coding challenges',
+          inputSchema,
+        },
+        {
+          name: 'smart_llm',
+          description: 'Use advanced AI models for intelligent code analysis and suggestions',
+          inputSchema,
+        },
+        {
+          name: 'ask_expert',
+          description: 'Ask coding experts for their professional opinion and guidance',
+          inputSchema,
+        },
+        {
+          name: 'review_code',
+          description: 'Get comprehensive code review with detailed feedback and improvements',
+          inputSchema,
         },
       ],
     };
@@ -330,7 +488,8 @@ export class SmartAdvisorServer {
       );
     }
     
-    if (name !== 'smart_advisor') {
+    const validTools = ['smart_advisor', 'code_review', 'get_advice', 'expert_opinion', 'smart_llm', 'ask_expert', 'review_code'];
+    if (!validTools.includes(name)) {
       this.logger.error('Unknown tool requested', { tool: name });
       throw new SmartAdvisorError(`Unknown tool: ${name}`, 'UNKNOWN_TOOL');
     }
@@ -358,7 +517,7 @@ export class SmartAdvisorServer {
     });
 
     if (model === 'all') {
-      return await this.consultAllAdvisors(sanitizedTask, sanitizedContext);
+      return await this.consultAllAdvisors(sanitizedTask, sanitizedContext, name);
     }
 
     if (!MODELS[model as keyof typeof MODELS]) {
@@ -382,7 +541,7 @@ export class SmartAdvisorServer {
     this.logger.info('Cache miss, making API call', { model });
 
     try {
-      const response = await this.callOpenRouterWithRetry(MODELS[model as keyof typeof MODELS], sanitizedTask, sanitizedContext);
+      const response = await this.callOpenRouterWithRetry(MODELS[model as keyof typeof MODELS], sanitizedTask, sanitizedContext, name);
       this.setCachedResponse(cacheKey, response);
       
       return {
@@ -405,8 +564,8 @@ export class SmartAdvisorServer {
     }
   }
 
-  private async consultAllAdvisors(task: string, context: string) {
-    const cacheKey = `all:${task}:${context}`;
+  private async consultAllAdvisors(task: string, context: string, toolName: string = 'smart_advisor') {
+    const cacheKey = `all:${task}:${context}:${toolName}`;
     const cached = this.getCachedResponse(cacheKey);
     if (cached) {
       return {
@@ -422,7 +581,7 @@ export class SmartAdvisorServer {
     const modelKeys = Object.keys(MODELS) as (keyof typeof MODELS)[];
     const advisorPromises = modelKeys.map(async (modelKey) => {
       try {
-        const response = await this.callOpenRouterWithRetry(MODELS[modelKey], task, context);
+        const response = await this.callOpenRouterWithRetry(MODELS[modelKey], task, context, toolName);
         return {
           model: modelKey,
           response,
@@ -504,12 +663,12 @@ export class SmartAdvisorServer {
     }
   }
 
-  private async callOpenRouterWithRetry(model: string, task: string, context: string): Promise<string> {
+  private async callOpenRouterWithRetry(model: string, task: string, context: string, toolName: string = 'smart_advisor'): Promise<string> {
     let lastError: Error | null = null;
     
     for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
       try {
-        return await this.callOpenRouter(model, task, context);
+        return await this.callOpenRouter(model, task, context, toolName);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown error');
         
@@ -542,10 +701,12 @@ export class SmartAdvisorServer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  private async callOpenRouter(model: string, task: string, context: string): Promise<string> {
+  private async callOpenRouter(model: string, task: string, context: string, toolName: string = 'smart_advisor'): Promise<string> {
     const userMessage = context 
       ? `Task: ${task}\n\nAdditional Context: ${context}`
       : `Task: ${task}`;
+
+    const systemPrompt = buildToolSpecificPrompt(toolName);
 
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
@@ -554,7 +715,7 @@ export class SmartAdvisorServer {
         messages: [
           {
             role: 'system',
-            content: SMART_ADVISOR_PROMPT,
+            content: systemPrompt,
           },
           {
             role: 'user',

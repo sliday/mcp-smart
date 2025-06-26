@@ -19,13 +19,14 @@ describe('Integration Tests', () => {
   describe('End-to-End Tool Flow', () => {
     it('should handle complete tool workflow', async () => {
       const tools = await server.listTools();
-      expect(tools.tools).toHaveLength(1);
+      expect(tools.tools).toHaveLength(7);
       expect(tools.tools[0].name).toBe('smart_advisor');
 
       const toolSchema = tools.tools[0].inputSchema;
       expect(toolSchema.properties.model.enum).toContain('google');
       expect(toolSchema.properties.model.enum).toContain('openai');
       expect(toolSchema.properties.model.enum).toContain('deepseek');
+      expect(toolSchema.properties.model.enum).toContain('all');
       expect(toolSchema.required).toEqual(['model', 'task']);
     });
 

@@ -46,8 +46,21 @@ describe('SmartAdvisorServer', () => {
     it('should list available tools', async () => {
       const result = await server.listTools();
       
-      expect(result.tools).toHaveLength(1);
-      expect(result.tools[0]).toEqual({
+      expect(result.tools).toHaveLength(7);
+      
+      const toolNames = result.tools.map(tool => tool.name);
+      expect(toolNames).toEqual([
+        'smart_advisor',
+        'code_review', 
+        'get_advice',
+        'expert_opinion',
+        'smart_llm',
+        'ask_expert',
+        'review_code'
+      ]);
+      
+      // Check first tool structure
+      expect(result.tools[0]).toMatchObject({
         name: 'smart_advisor',
         description: 'Get coding advice from premium LLMs using the Smart Advisor prompt structure',
         inputSchema: {
@@ -55,8 +68,8 @@ describe('SmartAdvisorServer', () => {
           properties: {
             model: {
               type: 'string',
-              enum: ['deepseek', 'google', 'openai'],
-              description: 'The provider to use for advice (deepseek, google, openai)',
+              enum: ['deepseek', 'google', 'openai', 'all'],
+              description: 'The provider to use for advice (deepseek, google, openai, all)',
             },
             task: {
               type: 'string',
@@ -69,6 +82,12 @@ describe('SmartAdvisorServer', () => {
           },
           required: ['model', 'task'],
         },
+      });
+      
+      // Check code_review tool has different description
+      expect(result.tools[1]).toMatchObject({
+        name: 'code_review',
+        description: 'Review your code and provide expert feedback from premium AI models'
       });
     });
 
@@ -107,6 +126,30 @@ describe('SmartAdvisorServer', () => {
         model: 'unknown-model',
         task: 'test task'
       })).rejects.toThrow('Unknown model: unknown-model');
+    });
+
+    it('should handle all new tool names', async () => {
+      const mockResponse = {
+        data: {
+          choices: [{
+            message: {
+              content: 'Tool-specific response'
+            }
+          }]
+        }
+      };
+      (mockedAxios.post as any).mockResolvedValue(mockResponse);
+
+      const newTools = ['code_review', 'get_advice', 'expert_opinion', 'smart_llm', 'ask_expert', 'review_code'];
+      
+      for (const toolName of newTools) {
+        const result = await server.callTool(toolName, {
+          model: 'deepseek',
+          task: 'test task'
+        });
+        
+        expect(result.content[0].text).toBe('Tool-specific response');
+      }
     });
   });
 

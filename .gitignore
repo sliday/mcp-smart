@@ -98,3 +98,10 @@ jspm_packages/
 
 # Testing
 test-results/
+
+# Claude Code specific files
+claude-code-config.json
+.users_cache.json
+
+# Development and testing
+test-server.js
