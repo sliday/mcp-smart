@@ -264,6 +264,14 @@ interface Config {
   rateLimitWindow: number;
 }
 
+interface CacheMetrics {
+  hits: number;
+  misses: number;
+  evictions: number;
+  totalRequests: number;
+  hitRate: number;
+}
+
 interface ValidationResult {
   isValid: boolean;
   error?: string;
@@ -280,8 +288,10 @@ export class SmartAdvisorServer {
   private server: Server;
   private config: Config;
   private requestCache = new Map<string, { response: string; timestamp: number; accessCount: number }>();
+  private cacheMetrics: CacheMetrics = { hits: 0, misses: 0, evictions: 0, totalRequests: 0, hitRate: 0 };
   private logger = new Logger('SmartAdvisorServer');
   private rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
+  private startTime = Date.now();
 
   constructor() {
     this.config = this.loadConfig();
@@ -345,8 +355,8 @@ export class SmartAdvisorServer {
       };
     }
 
-    // Basic sanitization - check for potential injection patterns
-    const suspiciousPatterns = [
+    // Enhanced security validation - check for injection patterns
+    const scriptInjectionPatterns = [
       /<script[^>]*>/i,
       /javascript:/i,
       /on\w+\s*=/i,
@@ -354,12 +364,49 @@ export class SmartAdvisorServer {
       /vbscript:/i
     ];
 
+    // Prompt injection patterns
+    const promptInjectionPatterns = [
+      /ignore\s+(previous|above|all|the)\s+(instructions?|prompts?|rules?)/i,
+      /forget\s+(everything|all|previous)/i,
+      /system\s*[:]\s*you\s+are\s+now/i,
+      /act\s+as\s+if\s+you\s+are/i,
+      /pretend\s+(you\s+are|to\s+be)/i,
+      /roleplay\s+as/i,
+      /new\s+(instructions?|rules?|system\s+prompt)/i,
+      /disregard\s+(previous|all|above)/i,
+      /override\s+(instructions?|system|previous)/i,
+      /simulate\s+(being|you\s+are)/i,
+      /\[SYSTEM\]/i,
+      /\<\|system\|\>/i,
+      /```\s*system/i
+    ];
+
     const combinedInput = task + ' ' + context;
-    for (const pattern of suspiciousPatterns) {
+    
+    // Check for script injection
+    for (const pattern of scriptInjectionPatterns) {
       if (pattern.test(combinedInput)) {
+        this.logger.warn('Script injection attempt detected', { 
+          pattern: pattern.source,
+          inputLength: combinedInput.length 
+        });
         return {
           isValid: false,
-          error: 'Input contains potentially unsafe content'
+          error: 'Input contains potentially malicious script content'
+        };
+      }
+    }
+
+    // Check for prompt injection
+    for (const pattern of promptInjectionPatterns) {
+      if (pattern.test(combinedInput)) {
+        this.logger.warn('Prompt injection attempt detected', { 
+          pattern: pattern.source,
+          inputLength: combinedInput.length 
+        });
+        return {
+          isValid: false,
+          error: 'Input contains potential prompt injection patterns'
         };
       }
     }
@@ -579,24 +626,67 @@ export class SmartAdvisorServer {
     }
 
     const modelKeys = Object.keys(MODELS) as (keyof typeof MODELS)[];
+    
+    // Use Promise.allSettled for better error resilience
     const advisorPromises = modelKeys.map(async (modelKey) => {
+      const startTime = Date.now();
       try {
+        this.logger.debug('Starting advisor query', { model: modelKey, tool: toolName });
         const response = await this.callOpenRouterWithRetry(MODELS[modelKey], task, context, toolName);
+        const duration = Date.now() - startTime;
+        
+        this.logger.debug('Advisor query completed', { 
+          model: modelKey, 
+          duration: `${duration}ms`,
+          responseLength: response.length 
+        });
+        
         return {
           model: modelKey,
           response,
           success: true,
+          duration
         };
       } catch (error) {
+        const duration = Date.now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
+        this.logger.warn('Advisor query failed', { 
+          model: modelKey, 
+          error: errorMessage,
+          duration: `${duration}ms`
+        });
+        
         return {
           model: modelKey,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: errorMessage,
           success: false,
+          duration
         };
       }
     });
 
-    const results = await Promise.all(advisorPromises);
+    const settledResults = await Promise.allSettled(advisorPromises);
+    
+    // Extract results from Promise.allSettled
+    const results = settledResults.map((settledResult, index) => {
+      if (settledResult.status === 'fulfilled') {
+        return settledResult.value;
+      } else {
+        // This should rarely happen since we catch errors in the map function
+        const modelKey = modelKeys[index];
+        this.logger.error('Unexpected promise rejection', { 
+          model: modelKey, 
+          error: settledResult.reason 
+        });
+        return {
+          model: modelKey,
+          error: 'Promise rejected unexpectedly',
+          success: false,
+          duration: 0
+        };
+      }
+    });
     const formattedResponse = this.formatMultiAdvisorResponse(results);
     
     this.setCachedResponse(cacheKey, formattedResponse);
@@ -612,16 +702,36 @@ export class SmartAdvisorServer {
   }
 
   private getCachedResponse(key: string): string | null {
+    this.cacheMetrics.totalRequests++;
+    
     const cached = this.requestCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.config.cacheTtl) {
+      // Cache hit
+      this.cacheMetrics.hits++;
+      this.updateCacheHitRate();
+      
       // Update access count and timestamp for LRU
       cached.accessCount++;
       this.requestCache.set(key, cached);
+      
+      this.logger.debug('Cache hit', { 
+        key: key.substring(0, 50) + '...', 
+        hitRate: this.cacheMetrics.hitRate.toFixed(2) + '%'
+      });
+      
       return cached.response;
     }
+    
+    // Cache miss or expired
+    this.cacheMetrics.misses++;
+    this.updateCacheHitRate();
+    
     if (cached) {
+      // Remove expired entry
       this.requestCache.delete(key);
+      this.logger.debug('Cache entry expired and removed', { key: key.substring(0, 50) + '...' });
     }
+    
     return null;
   }
 
@@ -654,13 +764,72 @@ export class SmartAdvisorServer {
     }
 
     if (lruKey) {
+      this.cacheMetrics.evictions++;
       this.logger.debug('Evicting LRU cache entry', { 
         key: lruKey.substring(0, 50) + '...',
         accessCount: lruAccessCount,
-        age: Date.now() - lruTimestamp
+        age: Date.now() - lruTimestamp,
+        totalEvictions: this.cacheMetrics.evictions
       });
       this.requestCache.delete(lruKey);
     }
+  }
+
+  private updateCacheHitRate(): void {
+    if (this.cacheMetrics.totalRequests > 0) {
+      this.cacheMetrics.hitRate = (this.cacheMetrics.hits / this.cacheMetrics.totalRequests) * 100;
+    }
+  }
+
+  public getCacheMetrics(): CacheMetrics {
+    return { ...this.cacheMetrics };
+  }
+
+  public getHealthCheck(): {
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    timestamp: string;
+    uptime: number;
+    cache: {
+      size: number;
+      hitRate: number;
+      evictions: number;
+    };
+    rateLimit: {
+      activeWindows: number;
+    };
+    version: string;
+  } {
+    const now = Date.now();
+    const cacheSize = this.requestCache.size;
+    const hitRate = this.cacheMetrics.hitRate;
+    
+    // Determine health status
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    
+    // Mark as degraded if cache hit rate is very low (might indicate issues)
+    if (this.cacheMetrics.totalRequests > 10 && hitRate < 10) {
+      status = 'degraded';
+    }
+    
+    // Mark as unhealthy if cache is at maximum capacity
+    if (cacheSize >= this.config.maxCacheSize) {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      timestamp: new Date().toISOString(),
+      uptime: now - this.startTime,
+      cache: {
+        size: cacheSize,
+        hitRate: Number(hitRate.toFixed(2)),
+        evictions: this.cacheMetrics.evictions
+      },
+      rateLimit: {
+        activeWindows: this.rateLimitTracker.size
+      },
+      version: '1.2.0'
+    };
   }
 
   private async callOpenRouterWithRetry(model: string, task: string, context: string, toolName: string = 'smart_advisor'): Promise<string> {
