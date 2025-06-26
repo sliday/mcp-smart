@@ -68,8 +68,8 @@ describe('SmartAdvisorServer', () => {
           properties: {
             model: {
               type: 'string',
-              enum: ['auto', 'intelligence', 'cost', 'balance', 'all', 'deepseek', 'google', 'openai'],
-              description: 'Routing strategy: auto (smart routing), intelligence (o3), cost (deepseek), balance (gemini), all (multi-provider), or specific provider',
+              enum: ['auto', 'intelligence', 'cost', 'balance', 'speed', 'premium', 'all', 'deepseek', 'google', 'openai', 'xai', 'claude'],
+              description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), all (multi-provider), or specific provider',
             },
             task: {
               type: 'string',
@@ -279,7 +279,7 @@ describe('SmartAdvisorServer', () => {
       };
 
       const testCases = [
-        { input: 'google', expected: 'google/gemini-2.5-pro' },
+        { input: 'google', expected: 'google/gemini-2.5-flash' },
         { input: 'openai', expected: 'openai/o3' },
         { input: 'deepseek', expected: 'deepseek/deepseek-chat-v3-0324' }
       ];
@@ -432,10 +432,14 @@ describe('SmartAdvisorServer', () => {
         expect(modelEnum).toContain('intelligence');
         expect(modelEnum).toContain('cost');
         expect(modelEnum).toContain('balance');
+        expect(modelEnum).toContain('speed');
+        expect(modelEnum).toContain('premium');
         expect(modelEnum).toContain('all');
         expect(modelEnum).toContain('deepseek');
         expect(modelEnum).toContain('google');
         expect(modelEnum).toContain('openai');
+        expect(modelEnum).toContain('xai');
+        expect(modelEnum).toContain('claude');
       });
 
       it('should route to correct providers for fixed strategies', async () => {
@@ -447,7 +451,7 @@ describe('SmartAdvisorServer', () => {
           }
         };
 
-        // Test intelligence strategy (should use OpenAI o3)
+        // Test intelligence strategy (should use Claude Sonnet 4)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'intelligence',
@@ -457,7 +461,7 @@ describe('SmartAdvisorServer', () => {
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'openai/o3'
+            model: 'anthropic/claude-sonnet-4'
           }),
           expect.any(Object)
         );
@@ -477,7 +481,7 @@ describe('SmartAdvisorServer', () => {
           expect.any(Object)
         );
 
-        // Test balance strategy (should use Google Gemini)
+        // Test balance strategy (should use Google Gemini Flash)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'balance',
@@ -487,7 +491,37 @@ describe('SmartAdvisorServer', () => {
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-pro'
+            model: 'google/gemini-2.5-flash'
+          }),
+          expect.any(Object)
+        );
+
+        // Test speed strategy (should use xAI Grok)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'speed',
+          task: 'quick coding task'
+        });
+        
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'x-ai/grok-3-beta'
+          }),
+          expect.any(Object)
+        );
+
+        // Test premium strategy (should use OpenAI o3)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'premium',
+          task: 'premium reasoning task'
+        });
+        
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'openai/o3'
           }),
           expect.any(Object)
         );
@@ -562,11 +596,11 @@ describe('SmartAdvisorServer', () => {
           task: 'help me with this task'
         });
 
-        // Should fallback to Google Gemini
+        // Should fallback to Google Gemini Flash
         expect(mockedAxios.post).toHaveBeenLastCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-pro'
+            model: 'google/gemini-2.5-flash'
           }),
           expect.any(Object)
         );
@@ -600,11 +634,11 @@ describe('SmartAdvisorServer', () => {
           task: 'help me with this task'
         });
 
-        // Should fallback to Google Gemini
+        // Should fallback to Google Gemini Flash
         expect(mockedAxios.post).toHaveBeenLastCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-pro'
+            model: 'google/gemini-2.5-flash'
           }),
           expect.any(Object)
         );

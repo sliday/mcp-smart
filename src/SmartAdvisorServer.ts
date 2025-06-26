@@ -41,54 +41,76 @@ class Logger {
 
 const MODELS = {
   'deepseek': 'deepseek/deepseek-chat-v3-0324',
-  'google': 'google/gemini-2.5-pro',
+  'google': 'google/gemini-2.5-flash',
   'openai': 'openai/o3',
+  'xai': 'x-ai/grok-3-beta',
+  'claude': 'anthropic/claude-sonnet-4',
   'router': 'openai/gpt-4o-mini' // For routing decisions
 } as const;
 
 const MODEL_NAMES = {
   'deepseek': 'DeepSeek AI',
-  'google': 'Google Gemini',
-  'openai': 'OpenAI GPT',
+  'google': 'Google Gemini Flash',
+  'openai': 'OpenAI o3',
+  'xai': 'xAI Grok',
+  'claude': 'Anthropic Claude Sonnet 4',
   'router': 'GPT-4.1-Mini Router'
 } as const;
 
-// Provider capabilities and cost tiers
+// Provider capabilities and cost tiers (ranked by intelligence: Claude > OpenAI > XAI/Google > DeepSeek)
 const PROVIDER_SPECS = {
   'deepseek': {
     cost: 'low',           // Very cheap
     intelligence: 'high',   // Good reasoning
     context: 'medium',     // Standard context window
     speed: 'fast',         // Fast responses
-    strengths: ['coding', 'logic', 'math', 'analysis']
+    strengths: ['coding', 'logic', 'math', 'analysis', 'cost-efficiency']
   },
   'google': {
-    cost: 'medium',        // Mid-tier pricing
-    intelligence: 'high',   // Excellent reasoning
-    context: 'high',       // Large context window (2M tokens)
-    speed: 'medium',       // Moderate speed
-    strengths: ['reasoning', 'research', 'long-context', 'multimodal']
+    cost: 'low',           // Low pricing with Flash
+    intelligence: 'very-high', // Excellent reasoning
+    context: 'highest',    // Largest context window (2M tokens)
+    speed: 'fast',         // Fast responses with Flash
+    strengths: ['reasoning', 'research', 'long-context', 'multimodal', 'speed']
   },
   'openai': {
-    cost: 'high',          // Most expensive
-    intelligence: 'highest', // Best reasoning
+    cost: 'very-high',     // Very expensive
+    intelligence: 'highest', // Top-tier reasoning
     context: 'medium',     // Standard context
-    speed: 'slow',         // Slower but highest quality
+    speed: 'slow',         // Slower but very high quality
     strengths: ['complex-reasoning', 'creativity', 'advanced-coding', 'problem-solving']
+  },
+  'xai': {
+    cost: 'medium',        // Mid-tier pricing
+    intelligence: 'very-high', // Strong reasoning
+    context: 'high',       // Large context window
+    speed: 'fast',         // Fast responses
+    strengths: ['reasoning', 'real-time-data', 'social-context', 'creative-thinking']
+  },
+  'claude': {
+    cost: 'high',          // Premium pricing
+    intelligence: 'ultimate', // Supreme reasoning capability
+    context: 'very-high',  // Very large context window (200k tokens)
+    speed: 'medium',       // Balanced speed
+    strengths: ['ultimate-reasoning', 'deep-analysis', 'ethical-coding', 'comprehensive-solutions', 'nuanced-understanding']
   }
 } as const;
 
 // Model routing strategies
 const ROUTING_STRATEGIES = {
   'auto': 'Let GPT-4o-mini choose the best provider for this specific task',
-  'intelligence': 'Prioritize the most capable model (OpenAI o3)',
+  'intelligence': 'Prioritize the most capable model (Claude Sonnet 4)',
   'cost': 'Prioritize the most cost-effective model (DeepSeek)',
-  'balance': 'Balance cost and performance (Google Gemini)',
+  'balance': 'Balance cost and performance (Google Gemini Flash)',
+  'speed': 'Prioritize fastest responses (xAI Grok)',
+  'premium': 'Use premium intelligence (OpenAI o3)',
   'all': 'Consult all providers',
   // Original providers still work
   'deepseek': 'Force DeepSeek',
-  'google': 'Force Google Gemini', 
-  'openai': 'Force OpenAI o3'
+  'google': 'Force Google Gemini Flash', 
+  'openai': 'Force OpenAI o3',
+  'xai': 'Force xAI Grok',
+  'claude': 'Force Claude Sonnet 4'
 } as const;
 
 const TOOL_SPECIFIC_ROLES = {
@@ -509,7 +531,7 @@ export class SmartAdvisorServer {
         model: {
           type: 'string',
           enum: [...Object.keys(ROUTING_STRATEGIES)],
-          description: 'Routing strategy: auto (smart routing), intelligence (o3), cost (deepseek), balance (gemini), all (multi-provider), or specific provider',
+          description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), all (multi-provider), or specific provider',
         },
         task: {
           type: 'string',
@@ -845,13 +867,15 @@ export class SmartAdvisorServer {
 
   private async routeToOptimalProvider(task: string, context: string, strategy: string): Promise<keyof typeof MODELS | 'all'> {
     // Handle non-auto strategies
-    if (strategy === 'intelligence') return 'openai';
-    if (strategy === 'cost') return 'deepseek';
-    if (strategy === 'balance') return 'google';
+    if (strategy === 'intelligence') return 'claude';  // Ultimate intelligence
+    if (strategy === 'premium') return 'openai';       // Premium alternative
+    if (strategy === 'cost') return 'deepseek';        // Most cost-effective
+    if (strategy === 'balance') return 'google';       // Balanced cost/performance
+    if (strategy === 'speed') return 'xai';            // Fastest responses
     if (strategy === 'all') return 'all';
     
     // Handle direct provider names
-    if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai') {
+    if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai' || strategy === 'xai' || strategy === 'claude') {
       return strategy as keyof typeof MODELS;
     }
 
@@ -860,26 +884,29 @@ export class SmartAdvisorServer {
       try {
         const routingPrompt = `You are a smart routing system that selects the best AI provider for a given coding task.
 
-Available providers:
-1. DeepSeek: Very cost-effective, fast, excellent for coding/logic/math/analysis
-2. Google Gemini: Balanced cost/performance, excellent reasoning, large context (2M tokens), good for research/long-context
-3. OpenAI o3: Most expensive but highest intelligence, best for complex reasoning/creativity/advanced coding
+Available providers (ranked by intelligence):
+1. Claude Sonnet 4: Ultimate intelligence, supreme reasoning, ethical coding, comprehensive solutions
+2. OpenAI o3: Very high intelligence, complex reasoning, creativity, advanced coding
+3. xAI Grok: Very high intelligence, fast responses, real-time data, creative thinking
+4. Google Gemini Flash: Very high intelligence, fast, large context (2M tokens), multimodal
+5. DeepSeek: High intelligence, very cost-effective, fast, excellent for coding/logic/math
 
 Task: "${task}"
 Context: "${context || 'None'}"
 
-Respond with ONLY the provider name: "deepseek", "google", or "openai"
+Respond with ONLY the provider name: "claude", "openai", "xai", "google", or "deepseek"
 
 Consider:
-- Task complexity (simple coding = deepseek, complex reasoning = openai, research/long-context = google)
+- Task complexity (simple = deepseek, moderate = google/xai, complex = openai, ultimate = claude)
 - Cost efficiency (prefer cheaper options when quality difference is minimal)
-- Provider strengths vs task requirements`;
+- Provider strengths vs task requirements
+- Context length needs (long context = google)`;
 
         const routingDecision = await this.callOpenRouter(MODELS.router, routingPrompt, '', 'auto');
         const cleanDecision = routingDecision.toLowerCase().trim();
         
         // Validate the routing decision
-        if (['deepseek', 'google', 'openai'].includes(cleanDecision)) {
+        if (['claude', 'openai', 'xai', 'google', 'deepseek'].includes(cleanDecision)) {
           this.logger.debug('Auto-routing decision', { 
             task: task.substring(0, 50) + '...', 
             selectedProvider: cleanDecision,
@@ -891,7 +918,7 @@ Consider:
             decision: routingDecision,
             fallback: 'google'
           });
-          return 'google'; // Safe fallback
+          return 'google'; // Safe fallback to Gemini Flash
         }
       } catch (error) {
         this.logger.error('Routing decision failed, falling back to balance', { 
