@@ -365,7 +365,7 @@ export class SmartAdvisorServer {
     this.server = new Server(
       {
         name: 'smart-advisor',
-        version: '1.0.0',
+        version: '1.4.0',
       },
       {
         capabilities: {
@@ -976,7 +976,7 @@ Consider:
       rateLimit: {
         activeWindows: this.rateLimitTracker.size
       },
-      version: '1.2.0'
+      version: '1.4.0'
     };
   }
 
