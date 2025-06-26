@@ -333,7 +333,7 @@ describe('SmartAdvisorServer', () => {
         expect(health.rateLimit).toMatchObject({
           activeWindows: expect.any(Number)
         });
-        expect(health.version).toBe('1.2.0');
+        expect(health.version).toBe('1.4.1');
       });
     });
 
