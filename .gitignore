@@ -102,6 +102,9 @@ test-results/
 # Claude Code specific files
 claude-code-config.json
 .users_cache.json
+.channels_cache.json
+*_cache.json
+*.cache.json
 
 # Development and testing
 test-server.js
