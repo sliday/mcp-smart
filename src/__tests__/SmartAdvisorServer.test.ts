@@ -421,5 +421,229 @@ describe('SmartAdvisorServer', () => {
         expect(result.content[0].text).toContain('encountered errors');
       });
     });
+
+    describe('Smart Routing System', () => {
+      it('should support all routing strategies in tool schema', async () => {
+        const tools = await server.listTools();
+        const modelEnum = tools.tools[0].inputSchema.properties.model.enum;
+        
+        expect(modelEnum).toContain('auto');
+        expect(modelEnum).toContain('intelligence');
+        expect(modelEnum).toContain('cost');
+        expect(modelEnum).toContain('balance');
+        expect(modelEnum).toContain('all');
+        expect(modelEnum).toContain('deepseek');
+        expect(modelEnum).toContain('google');
+        expect(modelEnum).toContain('openai');
+      });
+
+      it('should route to correct providers for fixed strategies', async () => {
+        const mockResponse = {
+          data: {
+            choices: [{
+              message: { content: 'Test response' }
+            }]
+          }
+        };
+
+        // Test intelligence strategy (should use OpenAI o3)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'intelligence',
+          task: 'complex reasoning task'
+        });
+        
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'openai/o3'
+          }),
+          expect.any(Object)
+        );
+
+        // Test cost strategy (should use DeepSeek)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'cost',
+          task: 'simple coding task'
+        });
+        
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'deepseek/deepseek-chat-v3-0324'
+          }),
+          expect.any(Object)
+        );
+
+        // Test balance strategy (should use Google Gemini)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'balance',
+          task: 'research task'
+        });
+        
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'google/gemini-2.5-pro'
+          }),
+          expect.any(Object)
+        );
+      });
+
+      it('should use auto routing with GPT-4o-mini for decision making', async () => {
+        const routingResponse = {
+          data: {
+            choices: [{
+              message: { content: 'deepseek' }
+            }]
+          }
+        };
+        
+        const taskResponse = {
+          data: {
+            choices: [{
+              message: { content: 'Final response from DeepSeek' }
+            }]
+          }
+        };
+
+        // First call for routing decision, second for actual task
+        (mockedAxios.post as any)
+          .mockResolvedValueOnce(routingResponse)  // Routing call
+          .mockResolvedValueOnce(taskResponse);    // Task call
+
+        const result = await server.callTool('smart_advisor', {
+          model: 'auto',
+          task: 'fix this bug in my Python code'
+        });
+
+        // Verify routing call to GPT-4o-mini
+        expect(mockedAxios.post).toHaveBeenNthCalledWith(
+          1,
+          expect.any(String),
+          expect.objectContaining({
+            model: 'openai/gpt-4o-mini'
+          }),
+          expect.any(Object)
+        );
+
+        // Verify task call to selected provider (DeepSeek)
+        expect(mockedAxios.post).toHaveBeenNthCalledWith(
+          2,
+          expect.any(String),
+          expect.objectContaining({
+            model: 'deepseek/deepseek-chat-v3-0324'
+          }),
+          expect.any(Object)
+        );
+
+        expect(result.content[0].text).toBe('Final response from DeepSeek');
+      });
+
+      it('should fallback to google when auto routing fails', async () => {
+        const routingError = new Error('Routing failed');
+        const taskResponse = {
+          data: {
+            choices: [{
+              message: { content: 'Fallback response from Google' }
+            }]
+          }
+        };
+
+        (mockedAxios.post as any)
+          .mockRejectedValueOnce(routingError)     // Routing call fails
+          .mockResolvedValueOnce(taskResponse);    // Task call succeeds
+
+        const result = await server.callTool('smart_advisor', {
+          model: 'auto',
+          task: 'help me with this task'
+        });
+
+        // Should fallback to Google Gemini
+        expect(mockedAxios.post).toHaveBeenLastCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'google/gemini-2.5-pro'
+          }),
+          expect.any(Object)
+        );
+
+        expect(result.content[0].text).toBe('Fallback response from Google');
+      });
+
+      it('should fallback to google when auto routing returns invalid provider', async () => {
+        const routingResponse = {
+          data: {
+            choices: [{
+              message: { content: 'invalid_provider_name' }
+            }]
+          }
+        };
+        
+        const taskResponse = {
+          data: {
+            choices: [{
+              message: { content: 'Fallback response from Google' }
+            }]
+          }
+        };
+
+        (mockedAxios.post as any)
+          .mockResolvedValueOnce(routingResponse)  // Invalid routing response
+          .mockResolvedValueOnce(taskResponse);    // Fallback task call
+
+        const result = await server.callTool('smart_advisor', {
+          model: 'auto',
+          task: 'help me with this task'
+        });
+
+        // Should fallback to Google Gemini
+        expect(mockedAxios.post).toHaveBeenLastCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            model: 'google/gemini-2.5-pro'
+          }),
+          expect.any(Object)
+        );
+
+        expect(result.content[0].text).toBe('Fallback response from Google');
+      });
+
+      it('should throw error for unknown routing strategy', async () => {
+        await expect(server.callTool('smart_advisor', {
+          model: 'unknown_strategy',
+          task: 'test task'
+        })).rejects.toThrow('Unknown routing strategy: unknown_strategy');
+      });
+
+      it('should cache based on selected provider, not routing strategy', async () => {
+        const mockResponse = {
+          data: {
+            choices: [{
+              message: { content: 'Cached response' }
+            }]
+          }
+        };
+
+        // First call with cost strategy (should select deepseek)
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        await server.callTool('smart_advisor', {
+          model: 'cost',
+          task: 'same task'
+        });
+
+        // Second call with direct deepseek (should hit cache)
+        const result = await server.callTool('smart_advisor', {
+          model: 'deepseek',
+          task: 'same task'
+        });
+
+        // Should only have made one API call (cache hit on second)
+        expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+        expect(result.content[0].text).toBe('Cached response');
+      });
+    });
   });
 });

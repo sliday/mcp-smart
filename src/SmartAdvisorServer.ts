@@ -42,13 +42,53 @@ class Logger {
 const MODELS = {
   'deepseek': 'deepseek/deepseek-chat-v3-0324',
   'google': 'google/gemini-2.5-pro',
-  'openai': 'openai/o3'
+  'openai': 'openai/o3',
+  'router': 'openai/gpt-4o-mini' // For routing decisions
 } as const;
 
 const MODEL_NAMES = {
   'deepseek': 'DeepSeek AI',
   'google': 'Google Gemini',
-  'openai': 'OpenAI GPT'
+  'openai': 'OpenAI GPT',
+  'router': 'GPT-4.1-Mini Router'
+} as const;
+
+// Provider capabilities and cost tiers
+const PROVIDER_SPECS = {
+  'deepseek': {
+    cost: 'low',           // Very cheap
+    intelligence: 'high',   // Good reasoning
+    context: 'medium',     // Standard context window
+    speed: 'fast',         // Fast responses
+    strengths: ['coding', 'logic', 'math', 'analysis']
+  },
+  'google': {
+    cost: 'medium',        // Mid-tier pricing
+    intelligence: 'high',   // Excellent reasoning
+    context: 'high',       // Large context window (2M tokens)
+    speed: 'medium',       // Moderate speed
+    strengths: ['reasoning', 'research', 'long-context', 'multimodal']
+  },
+  'openai': {
+    cost: 'high',          // Most expensive
+    intelligence: 'highest', // Best reasoning
+    context: 'medium',     // Standard context
+    speed: 'slow',         // Slower but highest quality
+    strengths: ['complex-reasoning', 'creativity', 'advanced-coding', 'problem-solving']
+  }
+} as const;
+
+// Model routing strategies
+const ROUTING_STRATEGIES = {
+  'auto': 'Let GPT-4o-mini choose the best provider for this specific task',
+  'intelligence': 'Prioritize the most capable model (OpenAI o3)',
+  'cost': 'Prioritize the most cost-effective model (DeepSeek)',
+  'balance': 'Balance cost and performance (Google Gemini)',
+  'all': 'Consult all providers',
+  // Original providers still work
+  'deepseek': 'Force DeepSeek',
+  'google': 'Force Google Gemini', 
+  'openai': 'Force OpenAI o3'
 } as const;
 
 const TOOL_SPECIFIC_ROLES = {
@@ -468,8 +508,8 @@ export class SmartAdvisorServer {
       properties: {
         model: {
           type: 'string',
-          enum: [...Object.keys(MODELS), 'all'],
-          description: 'The provider to use for advice (deepseek, google, openai, all)',
+          enum: [...Object.keys(ROUTING_STRATEGIES)],
+          description: 'Routing strategy: auto (smart routing), intelligence (o3), cost (deepseek), balance (gemini), all (multi-provider), or specific provider',
         },
         task: {
           type: 'string',
@@ -542,7 +582,7 @@ export class SmartAdvisorServer {
     }
 
     const { model, task, context = '' } = args as {
-      model: keyof typeof MODELS | 'all';
+      model: string;
       task: string;
       context?: string;
     };
@@ -563,18 +603,32 @@ export class SmartAdvisorServer {
       sanitizedContextLength: sanitizedContext.length
     });
 
-    if (model === 'all') {
+    // Validate routing strategy
+    if (!Object.keys(ROUTING_STRATEGIES).includes(model)) {
+      throw new SmartAdvisorError(`Unknown routing strategy: ${model}. Available: ${Object.keys(ROUTING_STRATEGIES).join(', ')}`, 'UNKNOWN_STRATEGY');
+    }
+
+    // Route to optimal provider
+    const selectedProvider = await this.routeToOptimalProvider(sanitizedTask, sanitizedContext, model);
+    
+    if (selectedProvider === 'all') {
       return await this.consultAllAdvisors(sanitizedTask, sanitizedContext, name);
     }
 
-    if (!MODELS[model as keyof typeof MODELS]) {
-      throw new SmartAdvisorError(`Unknown model: ${model}`, 'UNKNOWN_MODEL');
+    // Validate final provider selection (exclude 'router' from main providers)
+    const mainProviders = Object.keys(MODELS).filter(k => k !== 'router') as (keyof typeof MODELS)[];
+    if (!mainProviders.includes(selectedProvider as keyof typeof MODELS)) {
+      throw new SmartAdvisorError(`Invalid provider selection: ${selectedProvider}`, 'INVALID_PROVIDER');
     }
 
-    const cacheKey = `${model}:${sanitizedTask}:${sanitizedContext}`;
+    const cacheKey = `${selectedProvider}:${sanitizedTask}:${sanitizedContext}`;
     const cached = this.getCachedResponse(cacheKey);
     if (cached) {
-      this.logger.info('Cache hit', { model, cacheKey: cacheKey.substring(0, 50) + '...' });
+      this.logger.info('Cache hit', { 
+        strategy: model, 
+        selectedProvider, 
+        cacheKey: cacheKey.substring(0, 50) + '...' 
+      });
       return {
         content: [
           {
@@ -585,10 +639,14 @@ export class SmartAdvisorServer {
       };
     }
 
-    this.logger.info('Cache miss, making API call', { model });
+    this.logger.info('Cache miss, making API call', { 
+      strategy: model, 
+      selectedProvider,
+      reasoning: model === 'auto' ? 'AI-selected optimal provider' : 'Direct strategy selection'
+    });
 
     try {
-      const response = await this.callOpenRouterWithRetry(MODELS[model as keyof typeof MODELS], sanitizedTask, sanitizedContext, name);
+      const response = await this.callOpenRouterWithRetry(MODELS[selectedProvider as keyof typeof MODELS], sanitizedTask, sanitizedContext, name);
       this.setCachedResponse(cacheKey, response);
       
       return {
@@ -783,6 +841,69 @@ export class SmartAdvisorServer {
 
   public getCacheMetrics(): CacheMetrics {
     return { ...this.cacheMetrics };
+  }
+
+  private async routeToOptimalProvider(task: string, context: string, strategy: string): Promise<keyof typeof MODELS | 'all'> {
+    // Handle non-auto strategies
+    if (strategy === 'intelligence') return 'openai';
+    if (strategy === 'cost') return 'deepseek';
+    if (strategy === 'balance') return 'google';
+    if (strategy === 'all') return 'all';
+    
+    // Handle direct provider names
+    if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai') {
+      return strategy as keyof typeof MODELS;
+    }
+
+    // For 'auto' strategy, use GPT-4o-mini to make routing decision
+    if (strategy === 'auto') {
+      try {
+        const routingPrompt = `You are a smart routing system that selects the best AI provider for a given coding task.
+
+Available providers:
+1. DeepSeek: Very cost-effective, fast, excellent for coding/logic/math/analysis
+2. Google Gemini: Balanced cost/performance, excellent reasoning, large context (2M tokens), good for research/long-context
+3. OpenAI o3: Most expensive but highest intelligence, best for complex reasoning/creativity/advanced coding
+
+Task: "${task}"
+Context: "${context || 'None'}"
+
+Respond with ONLY the provider name: "deepseek", "google", or "openai"
+
+Consider:
+- Task complexity (simple coding = deepseek, complex reasoning = openai, research/long-context = google)
+- Cost efficiency (prefer cheaper options when quality difference is minimal)
+- Provider strengths vs task requirements`;
+
+        const routingDecision = await this.callOpenRouter(MODELS.router, routingPrompt, '', 'auto');
+        const cleanDecision = routingDecision.toLowerCase().trim();
+        
+        // Validate the routing decision
+        if (['deepseek', 'google', 'openai'].includes(cleanDecision)) {
+          this.logger.debug('Auto-routing decision', { 
+            task: task.substring(0, 50) + '...', 
+            selectedProvider: cleanDecision,
+            strategy: 'auto'
+          });
+          return cleanDecision as keyof typeof MODELS;
+        } else {
+          this.logger.warn('Invalid routing decision, falling back to balance', { 
+            decision: routingDecision,
+            fallback: 'google'
+          });
+          return 'google'; // Safe fallback
+        }
+      } catch (error) {
+        this.logger.error('Routing decision failed, falling back to balance', { 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          fallback: 'google'
+        });
+        return 'google'; // Safe fallback
+      }
+    }
+
+    // Default fallback
+    return 'google';
   }
 
   public getHealthCheck(): {
