@@ -1,6 +1,6 @@
 {
   "name": "mcp-smart",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "MCP server providing multi-advisor AI consultations via OpenRouter API with advanced caching, rate limiting, and security features",
   "main": "dist/index.js",
   "type": "module",
