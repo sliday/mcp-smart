@@ -99,12 +99,14 @@ jspm_packages/
 # Testing
 test-results/
 
-# Claude Code specific files
+# Claude Code and MCP cache files
 claude-code-config.json
 .users_cache.json
 .channels_cache.json
 *_cache.json
 *.cache.json
+.mcp_*
+mcp_cache/
 
 # Development and testing
 test-server.js
