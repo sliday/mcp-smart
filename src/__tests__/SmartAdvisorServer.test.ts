@@ -68,8 +68,8 @@ describe('SmartAdvisorServer', () => {
           properties: {
             model: {
               type: 'string',
-              enum: ['auto', 'intelligence', 'cost', 'balance', 'speed', 'premium', 'all', 'deepseek', 'google', 'openai', 'xai', 'claude'],
-              description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), all (multi-provider), or specific provider',
+              enum: ['auto', 'intelligence', 'cost', 'balance', 'speed', 'premium', 'random', 'all', 'deepseek', 'google', 'openai', 'xai', 'claude'],
+              description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), random (random provider), all (multi-provider), or specific provider',
             },
             task: {
               type: 'string',
@@ -301,6 +301,52 @@ describe('SmartAdvisorServer', () => {
         );
       }
     });
+
+    it('should handle random model selection', async () => {
+      const mockResponse = {
+        data: {
+          choices: [{
+            message: {
+              content: 'Random provider response'
+            }
+          }]
+        }
+      };
+
+      // Test random model selection multiple times with unique tasks to avoid caching
+      const validProviders = ['claude', 'openai', 'xai', 'google', 'deepseek'];
+      const startCallCount = (mockedAxios.post as any).mock.calls.length;
+      
+      for (let i = 0; i < 5; i++) {
+        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
+        
+        await server.callTool('smart_advisor', {
+          model: 'random',
+          task: `test random selection ${i}`
+        });
+
+        // Verify one of the valid providers was called
+        const callIndex = startCallCount + i;
+        const lastCall = (mockedAxios.post as any).mock.calls[callIndex];
+        
+        if (lastCall && lastCall[1]) {
+          const calledModel = lastCall[1].model;
+          
+          const isValidProvider = validProviders.some(provider => 
+            calledModel.includes(provider) || 
+            calledModel === `${provider}/` ||
+            calledModel.startsWith(`${provider}/`) ||
+            (provider === 'claude' && calledModel.includes('anthropic')) ||
+            (provider === 'openai' && (calledModel.includes('openai') || calledModel.includes('o3'))) ||
+            (provider === 'xai' && (calledModel.includes('x-ai') || calledModel.includes('grok'))) ||
+            (provider === 'google' && calledModel.includes('google')) ||
+            (provider === 'deepseek' && calledModel.includes('deepseek'))
+          );
+          
+          expect(isValidProvider).toBe(true);
+        }
+      }
+    });
   });
 
   describe('New Features', () => {
@@ -333,7 +379,7 @@ describe('SmartAdvisorServer', () => {
         expect(health.rateLimit).toMatchObject({
           activeWindows: expect.any(Number)
         });
-        expect(health.version).toBe('1.4.1');
+        expect(health.version).toBe('1.5.3');
       });
     });
 

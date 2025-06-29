@@ -13,6 +13,12 @@ enum LogLevel {
   DEBUG = 3
 }
 
+enum CircuitBreakerState {
+  CLOSED = 'CLOSED',
+  OPEN = 'OPEN',
+  HALF_OPEN = 'HALF_OPEN'
+}
+
 class Logger {
   constructor(private context: string) {}
 
@@ -104,6 +110,7 @@ const ROUTING_STRATEGIES = {
   'balance': 'Balance cost and performance (Google Gemini Flash)',
   'speed': 'Prioritize fastest responses (xAI Grok)',
   'premium': 'Use premium intelligence (OpenAI o3)',
+  'random': 'Randomly select from available providers',
   'all': 'Consult all providers',
   // Original providers still work
   'deepseek': 'Force DeepSeek',
@@ -324,6 +331,7 @@ interface Config {
   maxContextLength: number;
   rateLimitRequests: number;
   rateLimitWindow: number;
+  circuitBreaker: CircuitBreakerConfig;
 }
 
 interface CacheMetrics {
@@ -332,6 +340,22 @@ interface CacheMetrics {
   evictions: number;
   totalRequests: number;
   hitRate: number;
+}
+
+interface CircuitBreakerMetrics {
+  failures: number;
+  successes: number;
+  state: CircuitBreakerState;
+  lastFailureTime: number;
+  consecutiveFailures: number;
+  totalRequests: number;
+}
+
+interface CircuitBreakerConfig {
+  failureThreshold: number;
+  recoveryTimeout: number;
+  monitoringPeriod: number;
+  halfOpenMaxCalls: number;
 }
 
 interface ValidationResult {
@@ -346,6 +370,109 @@ class SmartAdvisorError extends Error {
   }
 }
 
+class CircuitBreaker {
+  private metrics: CircuitBreakerMetrics;
+  private config: CircuitBreakerConfig;
+  private logger: Logger;
+  private halfOpenCalls: number = 0;
+
+  constructor(config: CircuitBreakerConfig, logger: Logger, providerName: string) {
+    this.config = config;
+    this.logger = new Logger(`CircuitBreaker-${providerName}`);
+    this.metrics = {
+      failures: 0,
+      successes: 0,
+      state: CircuitBreakerState.CLOSED,
+      lastFailureTime: 0,
+      consecutiveFailures: 0,
+      totalRequests: 0
+    };
+  }
+
+  public async execute<T>(operation: () => Promise<T>): Promise<T> {
+    this.metrics.totalRequests++;
+
+    if (this.metrics.state === CircuitBreakerState.OPEN) {
+      if (this.shouldAttemptReset()) {
+        this.metrics.state = CircuitBreakerState.HALF_OPEN;
+        this.halfOpenCalls = 0;
+        this.logger.info('Circuit breaker transitioning to HALF_OPEN state');
+      } else {
+        throw new SmartAdvisorError(
+          'Circuit breaker is OPEN - provider temporarily unavailable',
+          'CIRCUIT_BREAKER_OPEN'
+        );
+      }
+    }
+
+    if (this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+      if (this.halfOpenCalls >= this.config.halfOpenMaxCalls) {
+        throw new SmartAdvisorError(
+          'Circuit breaker HALF_OPEN call limit exceeded',
+          'CIRCUIT_BREAKER_HALF_OPEN_LIMIT'
+        );
+      }
+      this.halfOpenCalls++;
+    }
+
+    try {
+      const result = await operation();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private onSuccess(): void {
+    this.metrics.successes++;
+    this.metrics.consecutiveFailures = 0;
+    
+    if (this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+      this.metrics.state = CircuitBreakerState.CLOSED;
+      this.halfOpenCalls = 0;
+      this.logger.info('Circuit breaker reset to CLOSED state after successful recovery');
+    }
+  }
+
+  private onFailure(): void {
+    this.metrics.failures++;
+    this.metrics.consecutiveFailures++;
+    this.metrics.lastFailureTime = Date.now();
+
+    if (this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+      this.metrics.state = CircuitBreakerState.OPEN;
+      this.halfOpenCalls = 0;
+      this.logger.warn('Circuit breaker opened due to failure in HALF_OPEN state');
+    } else if (this.metrics.consecutiveFailures >= this.config.failureThreshold) {
+      this.metrics.state = CircuitBreakerState.OPEN;
+      this.logger.warn(`Circuit breaker opened after ${this.metrics.consecutiveFailures} consecutive failures`);
+    }
+  }
+
+  private shouldAttemptReset(): boolean {
+    return Date.now() - this.metrics.lastFailureTime >= this.config.recoveryTimeout;
+  }
+
+  public getMetrics(): CircuitBreakerMetrics {
+    return { ...this.metrics };
+  }
+
+  public getState(): CircuitBreakerState {
+    return this.metrics.state;
+  }
+
+  public reset(): void {
+    this.metrics.state = CircuitBreakerState.CLOSED;
+    this.metrics.consecutiveFailures = 0;
+    this.metrics.failures = 0;
+    this.metrics.successes = 0;
+    this.halfOpenCalls = 0;
+    this.logger.info('Circuit breaker manually reset');
+  }
+}
+
 export class SmartAdvisorServer {
   private server: Server;
   private config: Config;
@@ -354,18 +481,20 @@ export class SmartAdvisorServer {
   private logger = new Logger('SmartAdvisorServer');
   private rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
   private startTime = Date.now();
+  private circuitBreakers = new Map<string, CircuitBreaker>();
 
   constructor() {
     this.config = this.loadConfig();
     this.logger.info('SmartAdvisorServer initializing', { 
       maxCacheSize: this.config.maxCacheSize,
-      cacheTtl: this.config.cacheTtl 
+      cacheTtl: this.config.cacheTtl,
+      circuitBreakerConfig: this.config.circuitBreaker
     });
     
     this.server = new Server(
       {
         name: 'smart-advisor',
-        version: '1.4.1',
+        version: '1.5.3',
       },
       {
         capabilities: {
@@ -374,8 +503,28 @@ export class SmartAdvisorServer {
       }
     );
 
+    this.initializeCircuitBreakers();
     this.setupToolHandlers();
     this.logger.info('SmartAdvisorServer initialized successfully');
+  }
+
+  private initializeCircuitBreakers(): void {
+    // Initialize circuit breakers for each AI provider
+    const providers = Object.keys(MODELS).filter(k => k !== 'router') as (keyof typeof MODELS)[];
+    
+    providers.forEach(provider => {
+      const circuitBreaker = new CircuitBreaker(
+        this.config.circuitBreaker,
+        this.logger,
+        provider
+      );
+      this.circuitBreakers.set(provider, circuitBreaker);
+    });
+    
+    this.logger.info('Circuit breakers initialized', { 
+      providers: providers,
+      config: this.config.circuitBreaker 
+    });
   }
 
   private loadConfig(): Config {
@@ -398,6 +547,12 @@ export class SmartAdvisorServer {
       maxContextLength: parseInt(process.env.MAX_CONTEXT_LENGTH || '20000', 10),
       rateLimitRequests: parseInt(process.env.RATE_LIMIT_REQUESTS || '10', 10),
       rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW || '60000', 10), // 1 minute
+      circuitBreaker: {
+        failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10),
+        recoveryTimeout: parseInt(process.env.CIRCUIT_BREAKER_RECOVERY_TIMEOUT || '60000', 10), // 1 minute
+        monitoringPeriod: parseInt(process.env.CIRCUIT_BREAKER_MONITORING_PERIOD || '300000', 10), // 5 minutes
+        halfOpenMaxCalls: parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS || '3', 10)
+      }
     };
   }
 
@@ -531,7 +686,7 @@ export class SmartAdvisorServer {
         model: {
           type: 'string',
           enum: [...Object.keys(ROUTING_STRATEGIES)],
-          description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), all (multi-provider), or specific provider',
+          description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), random (random provider), all (multi-provider), or specific provider',
         },
         task: {
           type: 'string',
@@ -874,6 +1029,19 @@ export class SmartAdvisorServer {
     if (strategy === 'speed') return 'xai';            // Fastest responses
     if (strategy === 'all') return 'all';
     
+    // Handle random strategy
+    if (strategy === 'random') {
+      const availableProviders = ['claude', 'openai', 'xai', 'google', 'deepseek'];
+      const randomIndex = Math.floor(Math.random() * availableProviders.length);
+      const selectedProvider = availableProviders[randomIndex];
+      this.logger.debug('Random provider selection', { 
+        selectedProvider,
+        availableProviders: availableProviders.length,
+        strategy: 'random'
+      });
+      return selectedProvider as keyof typeof MODELS;
+    }
+    
     // Handle direct provider names
     if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai' || strategy === 'xai' || strategy === 'claude') {
       return strategy as keyof typeof MODELS;
@@ -945,21 +1113,54 @@ Consider:
     rateLimit: {
       activeWindows: number;
     };
+    circuitBreakers: Record<string, {
+      state: CircuitBreakerState;
+      failures: number;
+      successRate: number;
+    }>;
     version: string;
   } {
     const now = Date.now();
     const cacheSize = this.requestCache.size;
     const hitRate = this.cacheMetrics.hitRate;
     
+    // Collect circuit breaker status
+    const circuitBreakerStatus: Record<string, { state: CircuitBreakerState; failures: number; successRate: number }> = {};
+    let openCircuitBreakers = 0;
+    
+    for (const [provider, cb] of this.circuitBreakers.entries()) {
+      const metrics = cb.getMetrics();
+      const successRate = metrics.totalRequests > 0 
+        ? ((metrics.totalRequests - metrics.failures) / metrics.totalRequests) * 100 
+        : 100;
+      
+      circuitBreakerStatus[provider] = {
+        state: metrics.state,
+        failures: metrics.failures,
+        successRate: Number(successRate.toFixed(2))
+      };
+      
+      if (metrics.state === CircuitBreakerState.OPEN) {
+        openCircuitBreakers++;
+      }
+    }
+    
     // Determine health status
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    
+    // Mark as unhealthy if more than half of circuit breakers are open
+    if (openCircuitBreakers > this.circuitBreakers.size / 2) {
+      status = 'unhealthy';
+    } else if (openCircuitBreakers > 0) {
+      status = 'degraded';
+    }
     
     // Mark as degraded if cache hit rate is very low (might indicate issues)
     if (this.cacheMetrics.totalRequests > 10 && hitRate < 10) {
       status = 'degraded';
     }
     
-    // Mark as unhealthy if cache is at maximum capacity
+    // Mark as degraded if cache is at maximum capacity
     if (cacheSize >= this.config.maxCacheSize) {
       status = 'degraded';
     }
@@ -976,11 +1177,109 @@ Consider:
       rateLimit: {
         activeWindows: this.rateLimitTracker.size
       },
-      version: '1.4.1'
+      circuitBreakers: circuitBreakerStatus,
+      version: '1.5.3'
     };
   }
 
+  public getCircuitBreakerMetrics(): Record<string, CircuitBreakerMetrics> {
+    const metrics: Record<string, CircuitBreakerMetrics> = {};
+    for (const [provider, cb] of this.circuitBreakers.entries()) {
+      metrics[provider] = cb.getMetrics();
+    }
+    return metrics;
+  }
+
+  public resetCircuitBreaker(provider: string): boolean {
+    const circuitBreaker = this.circuitBreakers.get(provider);
+    if (circuitBreaker) {
+      circuitBreaker.reset();
+      this.logger.info('Circuit breaker manually reset', { provider });
+      return true;
+    }
+    return false;
+  }
+
+  public resetAllCircuitBreakers(): void {
+    for (const [provider, cb] of this.circuitBreakers.entries()) {
+      cb.reset();
+    }
+    this.logger.info('All circuit breakers manually reset');
+  }
+
   private async callOpenRouterWithRetry(model: string, task: string, context: string, toolName: string = 'smart_advisor'): Promise<string> {
+    // Extract provider name from model string
+    const provider = this.getProviderFromModel(model);
+    const circuitBreaker = this.circuitBreakers.get(provider);
+    
+    if (!circuitBreaker) {
+      this.logger.warn('No circuit breaker found for provider, proceeding without circuit breaker', { provider, model });
+      return this.callOpenRouterWithRetryFallback(model, task, context, toolName);
+    }
+
+    try {
+      return await circuitBreaker.execute(() => 
+        this.callOpenRouterWithRetryFallback(model, task, context, toolName)
+      );
+    } catch (error) {
+      if (error instanceof SmartAdvisorError && error.code.startsWith('CIRCUIT_BREAKER')) {
+        this.logger.warn('Circuit breaker rejected request', { 
+          provider, 
+          model, 
+          state: circuitBreaker.getState(),
+          error: error.message 
+        });
+        // Attempt fallback to alternative provider if available
+        return this.attemptFallbackProvider(task, context, toolName, provider);
+      }
+      throw error;
+    }
+  }
+
+  private getProviderFromModel(model: string): string {
+    // Map model strings to provider keys
+    for (const [provider, modelString] of Object.entries(MODELS)) {
+      if (modelString === model) {
+        return provider;
+      }
+    }
+    // Fallback: try to extract provider from model string
+    if (model.includes('claude')) return 'claude';
+    if (model.includes('openai') || model.includes('gpt') || model.includes('o3')) return 'openai';
+    if (model.includes('google') || model.includes('gemini')) return 'google';
+    if (model.includes('x-ai') || model.includes('grok')) return 'xai';
+    if (model.includes('deepseek')) return 'deepseek';
+    
+    return 'unknown';
+  }
+
+  private async attemptFallbackProvider(task: string, context: string, toolName: string, failedProvider: string): Promise<string> {
+    // Define fallback hierarchy based on provider capabilities
+    const fallbackOrder = ['google', 'claude', 'xai', 'deepseek', 'openai'];
+    const availableProviders = fallbackOrder.filter(p => {
+      const cb = this.circuitBreakers.get(p);
+      return p !== failedProvider && cb && cb.getState() !== CircuitBreakerState.OPEN;
+    });
+
+    if (availableProviders.length === 0) {
+      throw new SmartAdvisorError(
+        `All providers unavailable. Primary provider '${failedProvider}' circuit breaker is open and no fallback providers available.`,
+        'ALL_PROVIDERS_UNAVAILABLE'
+      );
+    }
+
+    const fallbackProvider = availableProviders[0];
+    this.logger.info('Attempting fallback provider', { 
+      failedProvider, 
+      fallbackProvider,
+      availableProviders 
+    });
+
+    const fallbackModel = MODELS[fallbackProvider as keyof typeof MODELS];
+    return this.callOpenRouterWithRetryFallback(fallbackModel, task, context, toolName);
+  }
+
+  private async callOpenRouterWithRetryFallback(model: string, task: string, context: string, toolName: string = 'smart_advisor'): Promise<string> {
     let lastError: Error | null = null;
     
     for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
