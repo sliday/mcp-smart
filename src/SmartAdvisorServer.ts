@@ -46,21 +46,23 @@ class Logger {
 }
 
 const MODELS = {
-  'deepseek': 'deepseek/deepseek-chat-v3-0324',
-  'google': 'google/gemini-2.5-flash',
-  'openai': 'openai/o3',
-  'xai': 'x-ai/grok-3-beta',
-  'claude': 'anthropic/claude-sonnet-4',
-  'router': 'openai/gpt-4o-mini' // For routing decisions
+  'deepseek': 'deepseek/deepseek-v3.2-exp',
+  'google': 'google/gemini-3-pro-preview',
+  'openai': 'openai/gpt-5-pro',
+  'xai': 'x-ai/grok-4',
+  'claude': 'anthropic/claude-sonnet-4.5',
+  'moonshot': 'moonshotai/kimi-k2-thinking',
+  'router': 'openai/gpt-5-mini' // For routing decisions
 } as const;
 
 const MODEL_NAMES = {
-  'deepseek': 'DeepSeek AI',
-  'google': 'Google Gemini Flash',
-  'openai': 'OpenAI o3',
-  'xai': 'xAI Grok',
-  'claude': 'Anthropic Claude Sonnet 4',
-  'router': 'GPT-4.1-Mini Router'
+  'deepseek': 'DeepSeek v3.2',
+  'google': 'Google Gemini 3 Pro',
+  'openai': 'OpenAI GPT-5 Pro',
+  'xai': 'xAI Grok 4',
+  'claude': 'Anthropic Claude Sonnet 4.5',
+  'moonshot': 'Moonshot Kimi-K2 Thinking',
+  'router': 'GPT-5 Mini Router'
 } as const;
 
 // Provider capabilities and cost tiers (ranked by intelligence: Claude > OpenAI > XAI/Google > DeepSeek)
@@ -99,6 +101,13 @@ const PROVIDER_SPECS = {
     context: 'very-high',  // Very large context window (200k tokens)
     speed: 'medium',       // Balanced speed
     strengths: ['ultimate-reasoning', 'deep-analysis', 'ethical-coding', 'comprehensive-solutions', 'nuanced-understanding']
+  },
+  'moonshot': {
+    cost: 'medium',        // Mid-tier pricing
+    intelligence: 'very-high', // Strong reasoning capability
+    context: 'highest',    // Very large context window (2M tokens)
+    speed: 'fast',         // Fast responses
+    strengths: ['chinese-language', 'reasoning', 'coding', 'long-context', 'multimodal']
   }
 } as const;
 
@@ -117,7 +126,8 @@ const ROUTING_STRATEGIES = {
   'google': 'Force Google Gemini Flash', 
   'openai': 'Force OpenAI o3',
   'xai': 'Force xAI Grok',
-  'claude': 'Force Claude Sonnet 4'
+  'claude': 'Force Claude Sonnet 4',
+  'moonshot': 'Force Moonshot Kimi-K2'
 } as const;
 
 const TOOL_SPECIFIC_ROLES = {
@@ -494,7 +504,7 @@ export class SmartAdvisorServer {
     this.server = new Server(
       {
         name: 'smart-advisor',
-        version: '1.5.3',
+        version: '1.5.7',
       },
       {
         capabilities: {
@@ -1031,7 +1041,7 @@ export class SmartAdvisorServer {
     
     // Handle random strategy
     if (strategy === 'random') {
-      const availableProviders = ['claude', 'openai', 'xai', 'google', 'deepseek'];
+      const availableProviders = ['claude', 'openai', 'xai', 'google', 'deepseek', 'moonshot'];
       const randomIndex = Math.floor(Math.random() * availableProviders.length);
       const selectedProvider = availableProviders[randomIndex];
       this.logger.debug('Random provider selection', { 
@@ -1043,7 +1053,7 @@ export class SmartAdvisorServer {
     }
     
     // Handle direct provider names
-    if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai' || strategy === 'xai' || strategy === 'claude') {
+    if (strategy === 'deepseek' || strategy === 'google' || strategy === 'openai' || strategy === 'xai' || strategy === 'claude' || strategy === 'moonshot') {
       return strategy as keyof typeof MODELS;
     }
 
@@ -1053,11 +1063,11 @@ export class SmartAdvisorServer {
         const routingPrompt = `You are a smart routing system that selects the best AI provider for a given coding task.
 
 Available providers (ranked by intelligence):
-1. Claude Sonnet 4: Ultimate intelligence, supreme reasoning, ethical coding, comprehensive solutions
-2. OpenAI o3: Very high intelligence, complex reasoning, creativity, advanced coding
-3. xAI Grok: Very high intelligence, fast responses, real-time data, creative thinking
-4. Google Gemini Flash: Very high intelligence, fast, large context (2M tokens), multimodal
-5. DeepSeek: High intelligence, very cost-effective, fast, excellent for coding/logic/math
+1. Claude Sonnet 4.5: Ultimate intelligence, supreme reasoning, ethical coding, comprehensive solutions
+2. OpenAI GPT-5 Pro: Very high intelligence, complex reasoning, creativity, advanced coding
+3. xAI Grok 4: Very high intelligence, fast responses, real-time data, creative thinking
+4. Google Gemini 3 Pro: Very high intelligence, fast, large context (2M tokens), multimodal
+5. DeepSeek v3.2: High intelligence, very cost-effective, fast, excellent for coding/logic/math
 
 Task: "${task}"
 Context: "${context || 'None'}"
@@ -1178,7 +1188,7 @@ Consider:
         activeWindows: this.rateLimitTracker.size
       },
       circuitBreakers: circuitBreakerStatus,
-      version: '1.5.3'
+      version: '1.5.7'
     };
   }
 
@@ -1255,7 +1265,7 @@ Consider:
 
   private async attemptFallbackProvider(task: string, context: string, toolName: string, failedProvider: string): Promise<string> {
     // Define fallback hierarchy based on provider capabilities
-    const fallbackOrder = ['google', 'claude', 'xai', 'deepseek', 'openai'];
+    const fallbackOrder = ['google', 'claude', 'xai', 'moonshot', 'deepseek', 'openai'];
     const availableProviders = fallbackOrder.filter(p => {
       const cb = this.circuitBreakers.get(p);
       return p !== failedProvider && cb && cb.getState() !== CircuitBreakerState.OPEN;

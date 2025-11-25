@@ -1,12 +1,12 @@
 # 🎯 MCP Smart Advisor
 
-A powerful MCP (Model Context Protocol) server that provides intelligent AI routing and multi-advisor consultations through OpenRouter API. Get expert coding advice from 5 premium AI models with smart routing, advanced caching, rate limiting, and security features.
+A powerful MCP (Model Context Protocol) server that provides intelligent AI routing and multi-advisor consultations through OpenRouter API. Get expert coding advice from 6 premium AI models with smart routing, advanced caching, rate limiting, and security features.
 
 ## ✨ Features
 
 - **🧠 Smart Routing System** - Intelligent provider selection based on task requirements
 - **🎲 Random Mode** - NEW! Randomly selects from all available providers for unpredictable results
-- **🤖 5 Premium AI Providers** - Claude Sonnet 4, OpenAI o3, xAI Grok, Google Gemini Flash, DeepSeek
+- **🤖 6 Premium AI Providers** - Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, Moonshot Kimi-K2 Thinking
 - **⚡ Intelligent Caching** - LRU cache with configurable TTL to reduce API costs
 - **🛡️ Security First** - Input validation, prompt injection detection, and rate limiting
 - **📊 Comprehensive Logging** - Structured logging with cache metrics and health monitoring
@@ -18,12 +18,12 @@ A powerful MCP (Model Context Protocol) server that provides intelligent AI rout
 
 ### Install via npx
 ```bash
-npx mcp-smart@1.5.3
+npx mcp-smart@1.5.7
 ```
 
 ### Install globally
 ```bash
-npm install -g mcp-smart@1.5.3
+npm install -g mcp-smart@1.5.7
 ```
 
 ### Run directly
@@ -34,7 +34,7 @@ mcp-smart
 ### 🎲 Try Random Mode
 ```bash
 # Install and test the new random routing feature
-npx mcp-smart@1.5.3
+npx mcp-smart@1.5.7
 
 # In your MCP client, try:
 # model: "random" - for unpredictable AI provider selection
@@ -88,7 +88,7 @@ Add to your `claude-code-config.json`:
   "mcpServers": {
     "smart-advisor": {
       "command": "npx",
-      "args": ["mcp-smart@1.5.3"],
+      "args": ["mcp-smart@1.5.7"],
       "env": {
         "OPENROUTER_API_KEY": "your-openrouter-api-key-here"
       }
@@ -103,12 +103,12 @@ To enable automatic Smart advisor access in Claude Code, add this to your `~/.cl
 
 ```markdown
 When facing uncertainty and needing advice, you have exclusive access to L7 Google programmer named Smart. Ask him when appropriate using these terms: smart_advisor, code_review, get_advice, expert_opinion, smart_llm. You can specify what you're looking for, these are the modes available:
-- auto - GPT-4o-mini intelligently selects the best provider
-- intelligence - Routes to Claude Sonnet 4 (ultimate reasoning)
-- premium - Routes to OpenAI o3 (high-end reasoning)
-- speed - Routes to xAI Grok (fast responses)
-- balance - Routes to Google Gemini Flash (cost/performance balance)
-- cost - Routes to DeepSeek (budget-friendly)
+- auto - GPT-5 Mini intelligently selects the best provider
+- intelligence - Routes to Claude Sonnet 4.5 (ultimate reasoning)
+- premium - Routes to OpenAI GPT-5 Pro (high-end reasoning)
+- speed - Routes to xAI Grok 4 (fast responses)
+- balance - Routes to Google Gemini 3 Pro (cost/performance balance)
+- cost - Routes to DeepSeek v3.2 (budget-friendly)
 - all - Multi-provider consultation (all providers)
 ```
 
@@ -120,11 +120,12 @@ This integration allows Claude Code to automatically consult the Smart advisor w
 
 | Provider | Intelligence | Cost | Speed | Context | Strengths |
 |----------|-------------|------|-------|---------|-----------|
-| **Claude Sonnet 4** | 🔥 Ultimate | High | Medium | Very High | Supreme reasoning, ethical coding, comprehensive solutions |
-| **OpenAI o3** | 🏆 Highest | Very High | Slow | Medium | Complex reasoning, creativity, advanced coding |
-| **xAI Grok** | ⭐ Very High | Medium | Fast | High | Real-time data, creative thinking, fast responses |
-| **Google Gemini Flash** | ⭐ Very High | Low | Fast | Highest (2M) | Multimodal, research, long-context, speed |
-| **DeepSeek** | ✅ High | Low | Fast | Medium | Cost-effective, coding/logic/math, analysis |
+| **Claude Sonnet 4.5** | 🔥 Ultimate | High | Medium | Very High | Supreme reasoning, ethical coding, comprehensive solutions |
+| **OpenAI GPT-5 Pro** | 🏆 Highest | Very High | Slow | Medium | Complex reasoning, creativity, advanced coding |
+| **xAI Grok 4** | ⭐ Very High | Medium | Fast | High | Real-time data, creative thinking, fast responses |
+| **Google Gemini 3 Pro** | ⭐ Very High | Low | Fast | Highest (2M) | Multimodal, research, long-context, speed |
+| **DeepSeek v3.2** | ✅ High | Low | Fast | Medium | Cost-effective, coding/logic/math, analysis |
+| **Moonshot Kimi-K2 Thinking** | ⭐ Very High | Medium | Fast | Highest (2M) | Chinese language, reasoning, coding, long-context |
 
 ## 🎛️ Smart Routing Strategies
 
@@ -132,21 +133,22 @@ This integration allows Claude Code to automatically consult the Smart advisor w
 
 | Strategy | Provider | Use Case | Description |
 |----------|----------|----------|-------------|
-| **`auto`** ⚡ | GPT-4o-mini decides | Default smart routing | Intelligent provider selection based on task |
-| **`intelligence`** 🔥 | Claude Sonnet 4 | Ultimate reasoning | Most capable model for complex problems |
-| **`premium`** 🏆 | OpenAI o3 | Premium alternative | High-end reasoning and creativity |
-| **`speed`** 🚀 | xAI Grok | Fast responses | Quick turnaround with real-time data |
-| **`balance`** ⚖️ | Google Gemini Flash | Cost/performance | Optimal balance of speed, cost, and capability |
-| **`cost`** 💰 | DeepSeek | Budget-friendly | Maximum cost efficiency |
+| **`auto`** ⚡ | GPT-5 Mini decides | Default smart routing | Intelligent provider selection based on task |
+| **`intelligence`** 🔥 | Claude Sonnet 4.5 | Ultimate reasoning | Most capable model for complex problems |
+| **`premium`** 🏆 | OpenAI GPT-5 Pro | Premium alternative | High-end reasoning and creativity |
+| **`speed`** 🚀 | xAI Grok 4 | Fast responses | Quick turnaround with real-time data |
+| **`balance`** ⚖️ | Google Gemini 3 Pro | Cost/performance | Optimal balance of speed, cost, and capability |
+| **`cost`** 💰 | DeepSeek v3.2 | Budget-friendly | Maximum cost efficiency |
 | **`random`** 🎲 | Random provider | Unpredictable | Randomly selects from all available providers |
 | **`all`** 🌟 | All providers | Comprehensive | Multi-provider consultation |
 
 ### Direct Provider Access
-- **`claude`** - Force Claude Sonnet 4
-- **`openai`** - Force OpenAI o3  
-- **`xai`** - Force xAI Grok
-- **`google`** - Force Google Gemini Flash
-- **`deepseek`** - Force DeepSeek
+- **`claude`** - Force Claude Sonnet 4.5
+- **`openai`** - Force OpenAI GPT-5 Pro
+- **`xai`** - Force xAI Grok 4
+- **`google`** - Force Google Gemini 3 Pro
+- **`deepseek`** - Force DeepSeek v3.2
+- **`moonshot`** - Force Moonshot Kimi-K2 Thinking
 
 ## 💡 Example Usage
 
@@ -164,21 +166,21 @@ await smart_advisor({
 ```typescript
 // Maximum intelligence for complex problems
 await smart_advisor({
-  model: "intelligence", // Routes to Claude Sonnet 4
+  model: "intelligence", // Routes to Claude Sonnet 4.5
   task: "Design a fault-tolerant distributed system architecture",
   context: "Microservices with 99.99% uptime requirement"
 });
 
 // Speed-optimized responses
 await smart_advisor({
-  model: "speed", // Routes to xAI Grok
+  model: "speed", // Routes to xAI Grok 4
   task: "Quick debugging help for this JavaScript error",
   context: "TypeError in production, need fast solution"
 });
 
 // Cost-effective solutions
 await smart_advisor({
-  model: "cost", // Routes to DeepSeek
+  model: "cost", // Routes to DeepSeek v3.2
   task: "Write a simple sorting algorithm",
   context: "Basic coding task for learning"
 });
@@ -350,7 +352,19 @@ The project maintains high test coverage with 44/45 tests passing:
 
 ## 📊 Version History
 
-### v1.5.3 (Latest)
+### v1.5.7 (Latest)
+- 🚀 **Major Model Updates** - All providers upgraded to latest versions
+- ✨ Claude Sonnet 4 → Claude Sonnet 4.5 (enhanced reasoning)
+- ✨ OpenAI o3 → OpenAI GPT-5 Pro (next-generation intelligence)
+- ✨ xAI Grok-3-beta → xAI Grok 4 (improved speed and accuracy)
+- ✨ Google Gemini Flash → Google Gemini 3 Pro (enhanced capabilities)
+- ✨ DeepSeek v3-0324 → DeepSeek v3.2 (improved coding performance)
+- ✨ Moonshot Kimi-K2 → Moonshot Kimi-K2 Thinking (reasoning enhancement)
+- ✨ Router: GPT-4o-mini → GPT-5 Mini (smarter routing decisions)
+- 📚 Updated all documentation with new model names
+- 🎯 Improved routing prompts with latest model capabilities
+
+### v1.5.3
 - ✨ Added random routing strategy for unpredictable provider selection
 - 🎲 New `random` mode randomly selects from all available providers
 - 📚 Enhanced documentation with random mode benefits and use cases
@@ -397,5 +411,5 @@ If you find this project helpful, please give it a star on GitHub!
 
 ---
 
-**Built with ❤️ for the MCP ecosystem**  
-**Powered by Claude Sonnet 4, OpenAI o3, xAI Grok, Google Gemini Flash, and DeepSeek**
+**Built with ❤️ for the MCP ecosystem**
+**Powered by Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, and Moonshot Kimi-K2 Thinking**

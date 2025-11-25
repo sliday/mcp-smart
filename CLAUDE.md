@@ -1,0 +1,239 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**mcp-smart** is an MCP (Model Context Protocol) server that provides intelligent AI routing and multi-advisor consultations through OpenRouter API. It routes requests to 6 premium AI providers (Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, Moonshot Kimi-K2 Thinking) with smart routing, caching, rate limiting, and circuit breaker protection.
+
+## Architecture
+
+### Core Components
+
+- **SmartAdvisorServer** (`src/SmartAdvisorServer.ts`): Main server class implementing MCP protocol
+  - Manages 7 tool aliases that share the same underlying functionality
+  - Tools: `smart_advisor`, `code_review`, `get_advice`, `expert_opinion`, `smart_llm`, `ask_expert`, `review_code`
+  - Each tool routes to AI providers with specialized system prompts based on tool role
+
+- **CircuitBreaker** (within `SmartAdvisorServer.ts`): Individual circuit breakers per provider
+  - States: CLOSED (healthy), OPEN (failing), HALF_OPEN (testing recovery)
+  - Prevents cascading failures by opening circuits after consecutive failures
+  - Automatic recovery testing with configurable timeouts
+  - Intelligent fallback to healthy providers when primary fails
+
+- **Logger** (within `SmartAdvisorServer.ts`): Structured logging with context and log levels (ERROR, WARN, INFO, DEBUG)
+
+### Routing Strategies
+
+The system supports multiple routing strategies defined in `ROUTING_STRATEGIES`:
+
+1. **`auto`**: GPT-5 Mini intelligently selects optimal provider based on task complexity, cost, and requirements
+2. **`intelligence`**: Routes to Claude Sonnet 4.5 (ultimate reasoning)
+3. **`premium`**: Routes to OpenAI GPT-5 Pro (high-end reasoning)
+4. **`speed`**: Routes to xAI Grok 4 (fast responses)
+5. **`balance`**: Routes to Google Gemini 3 Pro (cost/performance balance)
+6. **`cost`**: Routes to DeepSeek v3.2 (budget-friendly)
+7. **`random`**: Randomly selects from available providers
+8. **`all`**: Consults all providers and formats multi-advisor response
+9. **Direct providers**: `claude`, `openai`, `xai`, `google`, `deepseek`, `moonshot`
+
+### Provider Intelligence Hierarchy
+
+Ranked by reasoning capability (see `PROVIDER_SPECS`):
+1. Claude Sonnet 4.5 (ultimate)
+2. OpenAI GPT-5 Pro (highest)
+3. xAI Grok 4 / Google Gemini 3 Pro (very-high)
+4. DeepSeek v3.2 (high)
+
+### Security & Resilience
+
+- **Input Validation**: Length limits and sanitization
+- **Prompt Injection Detection**: Pattern matching for malicious inputs (script injection, prompt injection attempts)
+- **Rate Limiting**: Configurable requests per time window with per-client tracking
+- **Circuit Breakers**: Per-provider fault isolation with automatic failover
+- **Caching**: LRU cache with TTL to reduce API costs
+- **Retry Logic**: Exponential backoff for transient failures
+
+## Development Commands
+
+### Building & Testing
+
+```bash
+# Build the TypeScript project
+npm run build
+
+# Run in development mode (with tsx)
+npm run dev
+
+# Start the built server
+npm start
+
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm test:watch
+
+# Run tests with coverage
+npm run test:coverage
+```
+
+### Testing Strategy
+
+- Uses Vitest as the test runner
+- Tests located in `src/__tests__/`
+- Current test files:
+  - `SmartAdvisorServer.test.ts`: Unit tests for core server functionality
+  - `integration.test.ts`: Integration tests
+  - `prompt.test.ts`: Prompt generation tests
+- Mock axios for API calls in tests
+- Test coverage tracked with v8 provider
+
+### Running a Single Test
+
+```bash
+# Run specific test file
+npm test SmartAdvisorServer.test.ts
+
+# Run tests matching pattern
+npm test -- -t "routing"
+```
+
+## Configuration
+
+All configuration via environment variables (see `loadConfig()` in SmartAdvisorServer.ts):
+
+### Required
+- `OPENROUTER_API_KEY`: OpenRouter API key (REQUIRED)
+
+### Optional (with defaults)
+- `MAX_RETRIES=3`: Retry attempts for failed requests
+- `REQUEST_TIMEOUT=30000`: Request timeout in milliseconds
+- `CACHE_TTL=300000`: Cache time-to-live (5 minutes)
+- `MAX_TOKENS=4000`: Maximum tokens per request
+- `MAX_CACHE_SIZE=100`: Maximum cached responses
+- `MAX_TASK_LENGTH=10000`: Maximum task input length
+- `MAX_CONTEXT_LENGTH=20000`: Maximum context input length
+- `RATE_LIMIT_REQUESTS=10`: Requests per window
+- `RATE_LIMIT_WINDOW=60000`: Rate limit window (1 minute)
+
+### Circuit Breaker Configuration
+- `CIRCUIT_BREAKER_FAILURE_THRESHOLD=5`: Consecutive failures before opening
+- `CIRCUIT_BREAKER_RECOVERY_TIMEOUT=60000`: Recovery attempt timeout (1 minute)
+- `CIRCUIT_BREAKER_MONITORING_PERIOD=300000`: Monitoring window (5 minutes)
+- `CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS=3`: Max calls in half-open state
+
+## Key Implementation Details
+
+### Tool-Specific Prompts
+
+The system uses `buildToolSpecificPrompt()` to customize prompts based on tool name:
+- Each tool has a specific role defined in `TOOL_SPECIFIC_ROLES`
+- Roles include: Smart Technical Advisor, Senior Code Reviewer, Coding Mentor, etc.
+- All tools use the same 4-persona system: Manager → CTO/Role → QA → Engineer
+
+### Circuit Breaker Flow
+
+1. **CLOSED state**: Normal operation, requests flow through
+2. **Failure tracking**: Consecutive failures increment counter
+3. **OPEN state**: Circuit opens after threshold, requests immediately rejected
+4. **Recovery attempt**: After timeout, transitions to HALF_OPEN
+5. **HALF_OPEN state**: Limited test requests allowed
+6. **Success**: Returns to CLOSED, resets counters
+7. **Failure**: Returns to OPEN, waits for next recovery window
+
+### Caching Strategy
+
+- LRU (Least Recently Used) cache implementation
+- Cache key: `${provider}:${task}:${context}`
+- Tracks hits, misses, evictions, and hit rate
+- Evicts least recently used when max size reached
+- TTL-based expiration with automatic cleanup
+
+### Multi-Advisor Consultation
+
+When `model: "all"` is specified:
+1. Uses `Promise.allSettled` to query all providers in parallel
+2. Gracefully handles individual provider failures
+3. Formats successful responses with clear sections per advisor
+4. Provides synthesis and next steps guidance
+
+## Claude Code Integration
+
+This MCP server is designed to integrate with Claude Code. Users add configuration to `~/.claude/CLAUDE.md`:
+
+```markdown
+When facing uncertainty and needing advice, you have exclusive access to L7 Google programmer named Smart. Ask him when appropriate using these terms: smart_advisor, code_review, get_advice, expert_opinion, smart_llm.
+```
+
+This creates a hook where Claude Code automatically invokes the MCP server when detecting relevant keywords in user prompts or system reasoning.
+
+## Publishing & Versioning
+
+- Package published to npm as `mcp-smart`
+- Current version: 1.5.7
+- Entry point: `dist/index.js` (built from `src/index.ts`)
+- Binary: `mcp-smart` command
+- Prepublish: Automatically runs `npm run build`
+
+## Project Structure
+
+```
+src/
+  index.ts                 - Entry point, creates and runs server
+  SmartAdvisorServer.ts    - Main server implementation (1400+ lines)
+    - Logger class
+    - CircuitBreaker class
+    - SmartAdvisorServer class
+  __tests__/
+    SmartAdvisorServer.test.ts - Unit tests
+    integration.test.ts        - Integration tests
+    prompt.test.ts             - Prompt tests
+
+dist/                      - Compiled JavaScript output
+package.json               - Package configuration
+tsconfig.json              - TypeScript configuration
+vitest.config.ts           - Test configuration
+```
+
+## Common Development Patterns
+
+### Adding a New Provider
+
+1. Add model to `MODELS` constant
+2. Add display name to `MODEL_NAMES`
+3. Add capabilities to `PROVIDER_SPECS`
+4. Update `ROUTING_STRATEGIES` enum if needed
+5. Circuit breaker automatically initialized for new provider
+6. Update README.md documentation
+
+### Adding a New Tool Alias
+
+1. Add tool to `TOOL_SPECIFIC_ROLES` with role, focus, description
+2. Add tool to `listTools()` return array with description
+3. Add tool name to `validTools` array in `callTool()`
+4. Tool will automatically use specialized prompt system
+
+### Debugging Circuit Breakers
+
+Use public methods:
+- `getCircuitBreakerMetrics()`: Get metrics for all circuit breakers
+- `getHealthCheck()`: Overall system health including circuit breaker states
+- `resetCircuitBreaker(provider)`: Manually reset specific provider
+- `resetAllCircuitBreakers()`: Reset all circuit breakers
+
+## Testing Considerations
+
+- Mock axios for all API calls
+- Reset environment variables in `beforeEach`/`afterEach`
+- Circuit breakers maintain state between test runs - use fresh server instance per test
+- Cache persists within server instance - clear or use fresh instance
+- Rate limiters track by client ID - use unique IDs or fresh instance
+
+## Important Gotchas
+
+1. **Router model excluded from main providers**: The `router` key in `MODELS` uses GPT-4o-mini for routing decisions, not for user-facing responses
+2. **Circuit breaker state persistence**: Circuit breakers maintain state across requests within the same server instance
+3. **Cache key construction**: Cache keys include provider, so same task with different routing strategies may hit different cache entries
+4. **Fallback hierarchy**: When circuit breaker opens, system uses intelligent fallback based on provider capabilities (google → claude → xai → moonshot → deepseek → openai)
+5. **Tool name matters**: Tool name affects system prompt via `buildToolSpecificPrompt()`, even though all tools share the same input schema

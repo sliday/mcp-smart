@@ -68,7 +68,7 @@ describe('SmartAdvisorServer', () => {
           properties: {
             model: {
               type: 'string',
-              enum: ['auto', 'intelligence', 'cost', 'balance', 'speed', 'premium', 'random', 'all', 'deepseek', 'google', 'openai', 'xai', 'claude'],
+              enum: ['auto', 'intelligence', 'cost', 'balance', 'speed', 'premium', 'random', 'all', 'deepseek', 'google', 'openai', 'xai', 'claude', 'moonshot'],
               description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), random (random provider), all (multi-provider), or specific provider',
             },
             task: {
@@ -179,7 +179,7 @@ describe('SmartAdvisorServer', () => {
       expect(mockedAxios.post).toHaveBeenCalledWith(
         'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'openai/o3',
+          model: 'openai/gpt-5-pro',
           messages: [
             {
               role: 'system',
@@ -279,9 +279,10 @@ describe('SmartAdvisorServer', () => {
       };
 
       const testCases = [
-        { input: 'google', expected: 'google/gemini-2.5-flash' },
-        { input: 'openai', expected: 'openai/o3' },
-        { input: 'deepseek', expected: 'deepseek/deepseek-chat-v3-0324' }
+        { input: 'google', expected: 'google/gemini-3-pro-preview' },
+        { input: 'openai', expected: 'openai/gpt-5-pro' },
+        { input: 'deepseek', expected: 'deepseek/deepseek-v3.2-exp' },
+        { input: 'moonshot', expected: 'moonshotai/kimi-k2-thinking' }
       ];
 
       for (const testCase of testCases) {
@@ -314,7 +315,7 @@ describe('SmartAdvisorServer', () => {
       };
 
       // Test random model selection multiple times with unique tasks to avoid caching
-      const validProviders = ['claude', 'openai', 'xai', 'google', 'deepseek'];
+      const validProviders = ['claude', 'openai', 'xai', 'google', 'deepseek', 'moonshot'];
       const startCallCount = (mockedAxios.post as any).mock.calls.length;
       
       for (let i = 0; i < 5; i++) {
@@ -340,7 +341,8 @@ describe('SmartAdvisorServer', () => {
             (provider === 'openai' && (calledModel.includes('openai') || calledModel.includes('o3'))) ||
             (provider === 'xai' && (calledModel.includes('x-ai') || calledModel.includes('grok'))) ||
             (provider === 'google' && calledModel.includes('google')) ||
-            (provider === 'deepseek' && calledModel.includes('deepseek'))
+            (provider === 'deepseek' && calledModel.includes('deepseek')) ||
+            (provider === 'moonshot' && calledModel.includes('moonshotai'))
           );
           
           expect(isValidProvider).toBe(true);
@@ -379,7 +381,7 @@ describe('SmartAdvisorServer', () => {
         expect(health.rateLimit).toMatchObject({
           activeWindows: expect.any(Number)
         });
-        expect(health.version).toBe('1.5.3');
+        expect(health.version).toBe('1.5.7');
       });
     });
 
@@ -486,6 +488,7 @@ describe('SmartAdvisorServer', () => {
         expect(modelEnum).toContain('openai');
         expect(modelEnum).toContain('xai');
         expect(modelEnum).toContain('claude');
+        expect(modelEnum).toContain('moonshot');
       });
 
       it('should route to correct providers for fixed strategies', async () => {
@@ -497,17 +500,17 @@ describe('SmartAdvisorServer', () => {
           }
         };
 
-        // Test intelligence strategy (should use Claude Sonnet 4)
+        // Test intelligence strategy (should use Claude Sonnet 4.5)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'intelligence',
           task: 'complex reasoning task'
         });
-        
+
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'anthropic/claude-sonnet-4'
+            model: 'anthropic/claude-sonnet-4.5'
           }),
           expect.any(Object)
         );
@@ -522,52 +525,52 @@ describe('SmartAdvisorServer', () => {
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'deepseek/deepseek-chat-v3-0324'
+            model: 'deepseek/deepseek-v3.2-exp'
           }),
           expect.any(Object)
         );
 
-        // Test balance strategy (should use Google Gemini Flash)
+        // Test balance strategy (should use Google Gemini 3 Pro)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'balance',
           task: 'research task'
         });
-        
+
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-flash'
+            model: 'google/gemini-3-pro-preview'
           }),
           expect.any(Object)
         );
 
-        // Test speed strategy (should use xAI Grok)
+        // Test speed strategy (should use xAI Grok 4)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'speed',
           task: 'quick coding task'
         });
-        
+
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'x-ai/grok-3-beta'
+            model: 'x-ai/grok-4'
           }),
           expect.any(Object)
         );
 
-        // Test premium strategy (should use OpenAI o3)
+        // Test premium strategy (should use OpenAI GPT-5 Pro)
         (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
         await server.callTool('smart_advisor', {
           model: 'premium',
           task: 'premium reasoning task'
         });
-        
+
         expect(mockedAxios.post).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'openai/o3'
+            model: 'openai/gpt-5-pro'
           }),
           expect.any(Object)
         );
@@ -600,12 +603,12 @@ describe('SmartAdvisorServer', () => {
           task: 'fix this bug in my Python code'
         });
 
-        // Verify routing call to GPT-4o-mini
+        // Verify routing call to GPT-5 Mini
         expect(mockedAxios.post).toHaveBeenNthCalledWith(
           1,
           expect.any(String),
           expect.objectContaining({
-            model: 'openai/gpt-4o-mini'
+            model: 'openai/gpt-5-mini'
           }),
           expect.any(Object)
         );
@@ -615,7 +618,7 @@ describe('SmartAdvisorServer', () => {
           2,
           expect.any(String),
           expect.objectContaining({
-            model: 'deepseek/deepseek-chat-v3-0324'
+            model: 'deepseek/deepseek-v3.2-exp'
           }),
           expect.any(Object)
         );
@@ -642,11 +645,11 @@ describe('SmartAdvisorServer', () => {
           task: 'help me with this task'
         });
 
-        // Should fallback to Google Gemini Flash
+        // Should fallback to Google Gemini 3 Pro
         expect(mockedAxios.post).toHaveBeenLastCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-flash'
+            model: 'google/gemini-3-pro-preview'
           }),
           expect.any(Object)
         );
@@ -662,7 +665,7 @@ describe('SmartAdvisorServer', () => {
             }]
           }
         };
-        
+
         const taskResponse = {
           data: {
             choices: [{
@@ -680,11 +683,11 @@ describe('SmartAdvisorServer', () => {
           task: 'help me with this task'
         });
 
-        // Should fallback to Google Gemini Flash
+        // Should fallback to Google Gemini 3 Pro
         expect(mockedAxios.post).toHaveBeenLastCalledWith(
           expect.any(String),
           expect.objectContaining({
-            model: 'google/gemini-2.5-flash'
+            model: 'google/gemini-3-pro-preview'
           }),
           expect.any(Object)
         );
