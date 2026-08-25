@@ -7,7 +7,7 @@
   "meta": null,
   "agent": "codex",
   "provider": null,
-  "model": "gpt-5.3-codex",
+  "model": "gpt-5.6-sol",
   "effort": "high",
   "max_iters": 8,
   "max_depth": 2,
