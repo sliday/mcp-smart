@@ -1,61 +1,53 @@
 ---
 name: state
-desc: Current routing, OpenRouter, and MCP contract implementation state and verified interfaces.
+desc: Delivered routing, OpenRouter, and MCP contracts with verified TDD evidence.
 created: 2026-08-25T23:31:41Z
-updated: 2026-08-25T23:31:41Z
+updated: 2026-08-25T23:55:00Z
 ---
 
 # state
 
-## Scope
+## Delivered boundary
 
-The node owns only `src/contracts.ts`, `src/openrouter.ts`,
-`src/SmartAdvisorServer.ts`, and their four named test files. The execution order
-is shared contracts, OpenRouter client, then MCP adapter compatibility.
+The node owns and delivers `src/contracts.ts`, `src/openrouter.ts`,
+`src/SmartAdvisorServer.ts`, and the four matching owned test files. No
+parent-owned project file differs from the dispatcher baseline.
 
-## Verified baseline
+- Shared contracts default to Balanced `openrouter/auto`, medium tier, and the
+  exact `auto-router` plugin. Direct routes omit the plugin.
+- Cache identity includes prompt version, canonical intent, resolved route,
+  restrictions, maximum tokens, task, and context without mutating inputs.
+- OpenRouter requests use root `session_id`, usage opt-in, metadata headers, and
+  plugin-local `allowed_models`/`excluded_models`. Optional response metadata is
+  present only when observed.
+- Stable errors cover missing key, authentication, credits, restrictions, no
+  eligible model/provider, timeout, provider/local rate limits, and circuit
+  breaker failures. Permanent responses stop immediately; transient timeout and
+  503 paths never exceed three total attempts.
+- MCP advertises exactly `consult`, `smart_doctor`, and `smart_status`, requires
+  only `task`, returns readable plus typed output, and keeps all seven legacy
+  aliases callable with canonical intent mapping. Raw input and existing prompt
+  content remain intact; diagnostics expose no secret values.
 
-- The contract and OpenRouter source/test files are absent.
-- `SmartAdvisorServer.ts` imports MCP `Server`, `StdioServerTransport`,
-  `CallToolRequestSchema`, and `ListToolsRequestSchema`; Axios is imported as the
-  default client plus `AxiosError`.
-- Public server methods are `listTools()`, `callTool(name: string, args: any)`,
-  `getHealthCheck()`, and `run()` with no arguments.
-- Current MCP behavior advertises seven aliases, requires `model` plus `task`,
-  rewrites whitespace, uses a provider/task/context text cache, and returns only
-  text content.
-- Installed MCP SDK 1.15.1 declarations allow tool `outputSchema` and optional
-  object `structuredContent` on call results. Installed Axios declarations expose
-  three-argument `post<T>`, timeout/abort configuration, and `AxiosError`
-  response/status/code fields.
-- Callable-tool discovery exposes no Context7 tool. The documentation call path
-  is stopped; installed declarations and tests are the verified fallback.
-- A parent directive restored the incidental `package-lock.json` engine diff to
-  this branch's HEAD. No parent- or sibling-owned project change remains. The
-  node-local `.system/` skill directory is generated seed state and remains
-  hand-edit-free for the normal Fractal lifecycle.
+## TDD evidence
 
-## Binding decisions
+- Contracts RED: 1 failed file and 0 collected tests because
+  `../contracts.js` was absent. GREEN: 1 passed file and 8 passed tests;
+  adjacent server suites passed 2 files and 34 tests.
+- OpenRouter RED: 1 failed file and 0 collected tests because
+  `../openrouter.js` was absent. GREEN: 1 passed file and 13 passed tests;
+  adjacent suites passed 3 files and 42 tests.
+- MCP RED: 2 failed files and 11 failed tests on the legacy advertised tools,
+  required model, text-only output, and missing diagnostics/errors. GREEN: 2
+  passed files and 11 passed tests.
 
-- Auto defaults are `openrouter/auto`, Balanced, medium, and plugin ID
-  `auto-router`; direct models have no plugin.
-- Provider-omitted request/provider/cost/usage/classification/fallback metadata
-  remains absent even where an illustrative type shows a required field.
-- Existing prompt strings remain intact, and raw task/context whitespace reaches
-  OpenRouter unchanged.
-- Cache identity uses a fixed-order serialization of prompt version, intent,
-  resolved route, restrictions, max tokens, task, and context. `fresh` bypasses
-  reads only.
+## Verification
 
-## Working checklist
+The required focused commands pass with 8, 13, and 11 tests respectively.
+`npm run build`, `git diff --check`, and the node lint script exit 0. The node
+test script exits 0 with 6 passed files, 48 passed tests, and a successful
+TypeScript build.
 
-Planning, source/declaration inspection, and the Context7-blocker report are
-complete. No owned TypeScript source or test file has been edited, and no focused
-RED/GREEN run exists yet. Tasks 2–4 remain unstarted.
-
-- Capture focused RED/GREEN evidence for contracts.
-- Capture focused RED/GREEN evidence for OpenRouter request, receipt, retry, and
-  error behavior.
-- Capture focused RED/GREEN evidence for canonical MCP tools, diagnostics,
-  hidden aliases, cache behavior, and stable local errors.
-- Run focused suites, build, diff checks, node test script, commit, and finish.
+Context7 was absent from the callable tool registry. Installed Axios 1.x and MCP
+SDK 1.15.1 declarations plus repository tests were the verified documentation
+fallback, and the blocker was reported before API implementation.

@@ -5,6 +5,14 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios, { AxiosError } from 'axios';
+import {
+  buildConsultationCacheKey,
+  type ConsultInput,
+  type ConsultationIntent,
+  type ConsultationResult,
+  type SmartErrorDetails,
+} from './contracts.js';
+import { OpenRouterClient } from './openrouter.js';
 
 enum LogLevel {
   ERROR = 0,
@@ -374,9 +382,18 @@ interface ValidationResult {
 }
 
 class SmartAdvisorError extends Error {
+  public readonly details: SmartErrorDetails;
+
   constructor(message: string, public code: string, public cause?: Error) {
     super(message);
     this.name = 'SmartAdvisorError';
+    this.details = {
+      code,
+      message,
+      action: code.startsWith('CIRCUIT_BREAKER')
+        ? 'Wait for provider recovery or choose another route.'
+        : 'Review the request and try again.',
+    };
   }
 }
 
@@ -492,6 +509,7 @@ export class SmartAdvisorServer {
   private rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
   private startTime = Date.now();
   private circuitBreakers = new Map<string, CircuitBreaker>();
+  private consultationCache = new Map<string, { result: ConsultationResult; timestamp: number }>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -520,7 +538,7 @@ export class SmartAdvisorServer {
 
   private initializeCircuitBreakers(): void {
     // Initialize circuit breakers for each AI provider
-    const providers = Object.keys(MODELS).filter(k => k !== 'router') as (keyof typeof MODELS)[];
+    const providers = [...Object.keys(MODELS).filter(k => k !== 'router'), 'openrouter'];
     
     providers.forEach(provider => {
       const circuitBreaker = new CircuitBreaker(
@@ -538,13 +556,7 @@ export class SmartAdvisorServer {
   }
 
   private loadConfig(): Config {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      throw new SmartAdvisorError(
-        'OPENROUTER_API_KEY environment variable is required',
-        'MISSING_API_KEY'
-      );
-    }
+    const apiKey = process.env.OPENROUTER_API_KEY ?? '';
 
     return {
       openrouterApiKey: apiKey,
@@ -689,171 +701,143 @@ export class SmartAdvisorServer {
     });
   }
 
-  async listTools() {
+  async listTools(): Promise<any> {
     const inputSchema = {
       type: 'object',
       properties: {
-        model: {
-          type: 'string',
-          enum: [...Object.keys(ROUTING_STRATEGIES)],
-          description: 'Routing strategy: auto (smart routing), intelligence (claude), premium (o3), cost (deepseek), balance (gemini), speed (grok), random (random provider), all (multi-provider), or specific provider',
-        },
-        task: {
-          type: 'string',
-          description: 'The coding task or problem you need advice on',
-        },
-        context: {
-          type: 'string',
-          description: 'Additional context about your project or requirements (optional)',
-        },
+        task: {type: 'string', description: 'The task or problem to consult on'},
+        context: {type: 'string', description: 'Optional supporting context'},
+        intent: {type: 'string', enum: ['advice', 'code-review', 'expert-opinion']},
+        preset: {type: 'string', enum: ['fast', 'balanced', 'best', 'custom']},
+        model: {type: 'string'},
+        costTier: {type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max']},
+        allowedModels: {type: 'array', items: {type: 'string'}},
+        excludedModels: {type: 'array', items: {type: 'string'}},
+        maxTokens: {type: 'integer', minimum: 1},
+        sessionId: {type: 'string'},
+        fresh: {type: 'boolean'},
       },
-      required: ['model', 'task'],
+      required: ['task'],
     };
+    const outputSchema = {
+      type: 'object',
+      properties: {
+        answer: {type: 'string'},
+        receipt: {type: 'object', additionalProperties: true},
+      },
+      required: ['answer', 'receipt'],
+    };
+    const diagnosticSchema = {type: 'object', properties: {}, additionalProperties: true};
 
-    return {
-      tools: [
-        {
-          name: 'smart_advisor',
-          description: 'Get coding advice from premium LLMs using the Smart Advisor prompt structure',
-          inputSchema,
-        },
-        {
-          name: 'code_review',
-          description: 'Review your code and provide expert feedback from premium AI models',
-          inputSchema,
-        },
-        {
-          name: 'get_advice',
-          description: 'Get coding advice and recommendations from AI experts',
-          inputSchema,
-        },
-        {
-          name: 'expert_opinion',
-          description: 'Get third-party expert consultation on your coding challenges',
-          inputSchema,
-        },
-        {
-          name: 'smart_llm',
-          description: 'Use advanced AI models for intelligent code analysis and suggestions',
-          inputSchema,
-        },
-        {
-          name: 'ask_expert',
-          description: 'Ask coding experts for their professional opinion and guidance',
-          inputSchema,
-        },
-        {
-          name: 'review_code',
-          description: 'Get comprehensive code review with detailed feedback and improvements',
-          inputSchema,
-        },
-      ],
-    };
+    return {tools: [
+      {name: 'consult', description: 'Get routed technical advice with a typed receipt', inputSchema, outputSchema},
+      {name: 'smart_doctor', description: 'Check local runtime and OpenRouter configuration', inputSchema: {type: 'object', properties: {}}, outputSchema: diagnosticSchema},
+      {name: 'smart_status', description: 'Show cache, rate-limit, and circuit-breaker status', inputSchema: {type: 'object', properties: {}}, outputSchema: diagnosticSchema},
+    ]};
   }
 
-  async callTool(name: string, args: any) {
-    this.logger.info('Tool call received', { tool: name, model: args?.model });
-    
-    // Rate limiting check
-    if (!this.checkRateLimit()) {
-      throw new SmartAdvisorError(
-        `Rate limit exceeded. Maximum ${this.config.rateLimitRequests} requests per ${this.config.rateLimitWindow / 1000} seconds`,
-        'RATE_LIMIT_EXCEEDED'
-      );
-    }
-    
-    const validTools = ['smart_advisor', 'code_review', 'get_advice', 'expert_opinion', 'smart_llm', 'ask_expert', 'review_code'];
-    if (!validTools.includes(name)) {
-      this.logger.error('Unknown tool requested', { tool: name });
+  async callTool(name: string, args: any): Promise<any> {
+    this.logger.info('Tool call received', {tool: name});
+    if (name === 'smart_doctor') return this.diagnosticResult({
+      nodeVersion: process.version,
+      apiKeyPresent: Boolean(this.config.openrouterApiKey.trim()),
+      maxTokens: this.config.maxTokens,
+      requestTimeoutMs: this.config.requestTimeout,
+    });
+    if (name === 'smart_status') return this.diagnosticResult(this.getHealthCheck());
+
+    const aliases = ['smart_advisor', 'code_review', 'get_advice', 'expert_opinion', 'smart_llm', 'ask_expert', 'review_code'];
+    if (name !== 'consult' && !aliases.includes(name)) {
       throw new SmartAdvisorError(`Unknown tool: ${name}`, 'UNKNOWN_TOOL');
     }
+    if (!this.checkRateLimit()) {
+      const error = new SmartAdvisorError('Local consultation rate limit exceeded.', 'LOCAL_RATE_LIMITED');
+      error.details.action = `Wait ${this.config.rateLimitWindow}ms before retrying.`;
+      throw error;
+    }
 
-    const { model, task, context = '' } = args as {
-      model: string;
-      task: string;
-      context?: string;
-    };
-
-    // Validate and sanitize inputs
+    const raw = args ?? {};
+    const task = raw.task;
+    const context = raw.context ?? '';
+    if (typeof task !== 'string' || task.trim().length === 0 || typeof context !== 'string') {
+      throw new SmartAdvisorError('A non-empty task and string context are required.', 'INVALID_INPUT');
+    }
     const validation = this.validateInput(task, context);
-    if (!validation.isValid) {
-      this.logger.warn('Input validation failed', { error: validation.error });
-      throw new SmartAdvisorError(validation.error!, 'INVALID_INPUT');
+    if (!validation.isValid) throw new SmartAdvisorError(validation.error!, 'INVALID_INPUT');
+
+    const intent = name === 'consult' ? (raw.intent ?? 'advice') : this.resolveIntent(name);
+    if (!['advice', 'code-review', 'expert-opinion'].includes(intent)) {
+      throw new SmartAdvisorError('Unknown consultation intent.', 'INVALID_INPUT');
     }
-
-    const sanitizedTask = this.sanitizeInput(task);
-    const sanitizedContext = this.sanitizeInput(context);
-    this.logger.debug('Input sanitized', { 
-      originalTaskLength: task.length,
-      sanitizedTaskLength: sanitizedTask.length,
-      originalContextLength: context.length,
-      sanitizedContextLength: sanitizedContext.length
-    });
-
-    // Validate routing strategy
-    if (!Object.keys(ROUTING_STRATEGIES).includes(model)) {
-      throw new SmartAdvisorError(`Unknown routing strategy: ${model}. Available: ${Object.keys(ROUTING_STRATEGIES).join(', ')}`, 'UNKNOWN_STRATEGY');
-    }
-
-    // Route to optimal provider
-    const selectedProvider = await this.routeToOptimalProvider(sanitizedTask, sanitizedContext, model);
-    
-    if (selectedProvider === 'all') {
-      return await this.consultAllAdvisors(sanitizedTask, sanitizedContext, name);
-    }
-
-    // Validate final provider selection (exclude 'router' from main providers)
-    const mainProviders = Object.keys(MODELS).filter(k => k !== 'router') as (keyof typeof MODELS)[];
-    if (!mainProviders.includes(selectedProvider as keyof typeof MODELS)) {
-      throw new SmartAdvisorError(`Invalid provider selection: ${selectedProvider}`, 'INVALID_PROVIDER');
-    }
-
-    const cacheKey = `${selectedProvider}:${sanitizedTask}:${sanitizedContext}`;
-    const cached = this.getCachedResponse(cacheKey);
-    if (cached) {
-      this.logger.info('Cache hit', { 
-        strategy: model, 
-        selectedProvider, 
-        cacheKey: cacheKey.substring(0, 50) + '...' 
-      });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: cached,
-          },
-        ],
+    const input: ConsultInput = {
+      task,
+      context: raw.context,
+      intent,
+      preset: raw.preset,
+      model: raw.model,
+      costTier: raw.costTier,
+      allowedModels: raw.allowedModels,
+      excludedModels: raw.excludedModels,
+      maxTokens: raw.maxTokens,
+      sessionId: raw.sessionId,
+      fresh: raw.fresh,
+    };
+    const promptName = name === 'consult' ? this.promptNameForIntent(intent) : name;
+    const cacheKey = buildConsultationCacheKey(input, `v2:${promptName}`);
+    const now = Date.now();
+    const cached = this.consultationCache.get(cacheKey);
+    if (!input.fresh && cached && now - cached.timestamp < this.config.cacheTtl) {
+      const result: ConsultationResult = {
+        answer: cached.result.answer,
+        receipt: {...cached.result.receipt, cacheHit: true, cacheAgeMs: now - cached.timestamp},
       };
+      this.cacheMetrics.hits++;
+      this.cacheMetrics.totalRequests++;
+      this.cacheMetrics.hitRate = (this.cacheMetrics.hits / this.cacheMetrics.totalRequests) * 100;
+      return this.consultationResult(result);
     }
 
-    this.logger.info('Cache miss, making API call', { 
-      strategy: model, 
-      selectedProvider,
-      reasoning: model === 'auto' ? 'AI-selected optimal provider' : 'Direct strategy selection'
+    this.cacheMetrics.misses++;
+    this.cacheMetrics.totalRequests++;
+    this.cacheMetrics.hitRate = (this.cacheMetrics.hits / this.cacheMetrics.totalRequests) * 100;
+    const client = new OpenRouterClient({
+      apiKey: this.config.openrouterApiKey,
+      maxTokens: this.config.maxTokens,
+      timeoutMs: this.config.requestTimeout,
+      maxAttempts: this.config.maxRetries,
+      buildSystemPrompt: () => buildToolSpecificPrompt(promptName),
     });
-
-    try {
-      const response = await this.callOpenRouterWithRetry(MODELS[selectedProvider as keyof typeof MODELS], sanitizedTask, sanitizedContext, name);
-      this.setCachedResponse(cacheKey, response);
-      
-      return {
-        content: [
-          {
-            type: 'text',
-            text: response,
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof SmartAdvisorError) {
-        throw error;
-      }
-      throw new SmartAdvisorError(
-        `OpenRouter API error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'API_ERROR',
-        error instanceof Error ? error : undefined
-      );
+    const breaker = this.circuitBreakers.get('openrouter');
+    const result = breaker
+      ? await breaker.execute(() => client.consult(input))
+      : await client.consult(input);
+    this.consultationCache.set(cacheKey, {result, timestamp: Date.now()});
+    if (this.consultationCache.size > this.config.maxCacheSize) {
+      const oldest = this.consultationCache.keys().next().value;
+      if (oldest !== undefined) this.consultationCache.delete(oldest);
+      this.cacheMetrics.evictions++;
     }
+    return this.consultationResult(result);
+  }
+
+  private resolveIntent(name: string): ConsultationIntent {
+    if (name === 'code_review' || name === 'review_code') return 'code-review';
+    if (name === 'expert_opinion' || name === 'ask_expert') return 'expert-opinion';
+    return 'advice';
+  }
+
+  private promptNameForIntent(intent: ConsultationIntent): string {
+    if (intent === 'code-review') return 'code_review';
+    if (intent === 'expert-opinion') return 'expert_opinion';
+    return 'smart_advisor';
+  }
+
+  private consultationResult(result: ConsultationResult): any {
+    return {content: [{type: 'text', text: result.answer}], structuredContent: result};
+  }
+
+  private diagnosticResult(data: Record<string, unknown>): any {
+    return {content: [{type: 'text', text: JSON.stringify(data, null, 2)}], structuredContent: data};
   }
 
   private async consultAllAdvisors(task: string, context: string, toolName: string = 'smart_advisor') {
@@ -1131,7 +1115,7 @@ Consider:
     version: string;
   } {
     const now = Date.now();
-    const cacheSize = this.requestCache.size;
+    const cacheSize = this.requestCache.size + this.consultationCache.size;
     const hitRate = this.cacheMetrics.hitRate;
     
     // Collect circuit breaker status
