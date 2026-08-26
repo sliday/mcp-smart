@@ -3,6 +3,7 @@ import { SmartAdvisorServer } from './SmartAdvisorServer.js';
 import { runAsk } from './commands/ask.js';
 import { runDoctor } from './commands/doctor.js';
 import { runInit } from './commands/init.js';
+import type { SmartErrorDetails } from './contracts.js';
 
 export type CliCommand =
   | { name: 'mcp' }
@@ -64,6 +65,39 @@ function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+function errorDetails(error: unknown): SmartErrorDetails {
+  if (typeof error === 'object' && error !== null && 'details' in error) {
+    const details = error.details;
+    if (
+      typeof details === 'object' && details !== null &&
+      'code' in details && typeof details.code === 'string' &&
+      'message' in details && typeof details.message === 'string' &&
+      'action' in details && typeof details.action === 'string'
+    ) {
+      return details as SmartErrorDetails;
+    }
+  }
+
+  return {
+    code: 'COMMAND_FAILED',
+    message: error instanceof Error ? error.message : String(error),
+    action: 'Run with DEBUG=1 for diagnostics.',
+  };
+}
+
+function writeError(error: unknown, json: boolean, debug: boolean): void {
+  const details = errorDetails(error);
+  if (json) {
+    const output: {error: SmartErrorDetails; debug?: {stack: string}} = {error: details};
+    if (debug && error instanceof Error && error.stack) output.debug = {stack: error.stack};
+    process.stderr.write(`${JSON.stringify(output)}\n`);
+    return;
+  }
+
+  process.stderr.write(`${details.message}\nAction: ${details.action}\n`);
+  if (debug && error instanceof Error && error.stack) process.stderr.write(`${error.stack}\n`);
+}
+
 function formatReceipt(receipt: object): string {
   return Object.entries(receipt)
     .filter(([, value]) => value !== undefined)
@@ -71,7 +105,7 @@ function formatReceipt(receipt: object): string {
     .join(' · ');
 }
 
-export async function runCli(
+async function runCliCommand(
   argv: string[],
   env: NodeJS.ProcessEnv,
   injectedDependencies: Partial<CliDependencies> = {}
@@ -123,7 +157,7 @@ export async function runCli(
     } else {
       const checks = Object.entries(result.checks).map(([name, check]) => {
         const detail = check.value ?? check.action;
-        return `${name}: ${check.status}${detail ? ` — ${detail}` : ''}`;
+        return `${name}: ${check.status}${detail ? ` - ${detail}` : ''}`;
       });
       process.stdout.write(`${checks.join('\n')}\n`);
     }
@@ -137,4 +171,17 @@ export async function runCli(
     process.stdout.write(`${result.answer}\n\nReceipt: ${formatReceipt(result.receipt)}\n`);
   }
   return 0;
+}
+
+export async function runCli(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  injectedDependencies: Partial<CliDependencies> = {}
+): Promise<number> {
+  try {
+    return await runCliCommand(argv, env, injectedDependencies);
+  } catch (error) {
+    writeError(error, argv.includes('--json'), env.DEBUG === '1');
+    return 1;
+  }
 }

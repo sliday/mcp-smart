@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseCommand, runCli } from '../cli.js';
+import { CommandError } from '../commands/ask.js';
 
 describe('CLI dispatch', () => {
   afterEach(() => {
@@ -103,5 +104,54 @@ describe('CLI dispatch', () => {
     })).resolves.toBe(0);
 
     expect(JSON.parse(String(write.mock.calls[0]?.[0]))).toEqual(result);
+  });
+
+  it('prints a stable error and action without a stack', async () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new CommandError({
+      code: 'TASK_REQUIRED',
+      message: 'A consultation task is required.',
+      action: 'Provide a task and try again.',
+    });
+
+    await expect(runCli(['ask', ''], {}, {
+      runAsk: vi.fn().mockRejectedValue(error),
+    })).resolves.toBe(1);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output).toBe('A consultation task is required.\nAction: Provide a task and try again.\n');
+    expect(output).not.toContain('CommandError');
+  });
+
+  it('prints stable errors as one JSON document', async () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new CommandError({
+      code: 'TASK_REQUIRED',
+      message: 'A consultation task is required.',
+      action: 'Provide a task and try again.',
+    });
+
+    await expect(runCli(['ask', '', '--json'], {}, {
+      runAsk: vi.fn().mockRejectedValue(error),
+    })).resolves.toBe(1);
+
+    expect(JSON.parse(String(write.mock.calls[0]?.[0]))).toEqual({
+      error: error.details,
+    });
+  });
+
+  it('prints the stack when DEBUG is enabled', async () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new CommandError({
+      code: 'TASK_REQUIRED',
+      message: 'A consultation task is required.',
+      action: 'Provide a task and try again.',
+    });
+
+    await expect(runCli(['ask', ''], {DEBUG: '1'}, {
+      runAsk: vi.fn().mockRejectedValue(error),
+    })).resolves.toBe(1);
+
+    expect(write.mock.calls.map(call => String(call[0])).join('')).toContain(error.stack);
   });
 });

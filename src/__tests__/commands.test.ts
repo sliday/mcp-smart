@@ -53,6 +53,22 @@ describe('command workflows', () => {
     expect(JSON.stringify(result)).not.toContain('not-for-output');
   });
 
+  it('uses the authenticated OpenRouter key endpoint for the default probe', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ok: true} as Response);
+
+    const result = await runDoctor({
+      env: {OPENROUTER_API_KEY: 'not-for-output'},
+      nodeVersion: '22.1.0',
+      isTerminal: true,
+    });
+
+    expect(result.checks.openRouter).toEqual({status: 'ok'});
+    expect(fetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/auth/key', {
+      headers: {Authorization: 'Bearer not-for-output'},
+    });
+    expect(JSON.stringify(result)).not.toContain('not-for-output');
+  });
+
   it('rejects an empty task with an actionable stable error', async () => {
     await expect(runAsk(' \n\t ', {env: {}})).rejects.toMatchObject({
       details: {
