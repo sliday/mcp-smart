@@ -1,3 +1,5 @@
+import stringWidth from 'string-width';
+
 const graphemeSegmenter = new Intl.Segmenter(undefined, {granularity: 'grapheme'});
 
 export function terminalGraphemes(value: string): string[] {
@@ -11,17 +13,7 @@ export function withoutLastTerminalGrapheme(value: string): string {
 }
 
 export function terminalGraphemeWidth(grapheme: string): number {
-  if (grapheme.length === 0 || /^\p{Mark}+$/u.test(grapheme)) return 0;
-  if (/\p{Extended_Pictographic}/u.test(grapheme)) return 2;
-  const codePoint = grapheme.codePointAt(0) ?? 0;
-  return codePoint >= 0x1100 && (
-    codePoint <= 0x115f || codePoint === 0x2329 || codePoint === 0x232a ||
-    codePoint >= 0x2e80 && codePoint <= 0xa4cf ||
-    codePoint >= 0xac00 && codePoint <= 0xd7a3 ||
-    codePoint >= 0xf900 && codePoint <= 0xfaff ||
-    codePoint >= 0xfe10 && codePoint <= 0xfe6f ||
-    codePoint >= 0xff00 && codePoint <= 0xff60
-  ) ? 2 : 1;
+  return stringWidth(grapheme);
 }
 
 export function terminalTextWidth(value: string): number {

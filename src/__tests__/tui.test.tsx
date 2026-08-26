@@ -2,6 +2,7 @@ import React from 'react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {cleanup, render} from 'ink-testing-library';
 import type {DoctorResult} from '../commands/doctor.js';
+import {terminalGraphemeWidth, wrapTerminalLine} from '../terminal.js';
 import {App, type TuiDependencies} from '../tui/App.js';
 import {TextArea} from '../tui/TextArea.js';
 import {runTui} from '../tui/index.js';
@@ -40,6 +41,12 @@ function dependencies(overrides: Partial<TuiDependencies> = {}): TuiDependencies
 }
 
 describe('Ink terminal interface', () => {
+  it('measures and wraps flag and keycap graphemes by terminal cells', () => {
+    expect(terminalGraphemeWidth('🇸🇮')).toBe(2);
+    expect(terminalGraphemeWidth('1️⃣')).toBe(2);
+    expect(wrapTerminalLine('🇸🇮🇸🇮🇸🇮', 4)).toEqual(['🇸🇮🇸🇮', '🇸🇮']);
+  });
+
   it('shows the selected route, current focus, default policy, navigation, and footer', () => {
     const view = render(<App terminalWidth={100} dependencies={dependencies()}/>);
 
