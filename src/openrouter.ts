@@ -12,10 +12,20 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 interface OpenRouterResponse {
   id?: string;
   model?: string;
-  provider?: string;
-  task_type?: string;
-  fallback_used?: boolean;
   choices?: Array<{message?: {content?: string}}>;
+  openrouter_metadata?: {
+    endpoints?: {
+      available?: Array<{
+        provider?: string;
+        selected?: boolean;
+      }>;
+    };
+    pipeline?: Array<{
+      data?: {
+        task_type?: string;
+      };
+    }>;
+  };
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -120,7 +130,10 @@ export class OpenRouterClient {
   private readonly delay: (ms: number) => Promise<void>;
 
   constructor(private readonly options: OpenRouterClientOptions) {
-    this.maxAttempts = Math.max(1, Math.min(3, options.maxAttempts ?? 3));
+    const configuredMaxAttempts = options.maxAttempts ?? 3;
+    this.maxAttempts = Number.isFinite(configuredMaxAttempts)
+      ? Math.max(1, Math.min(3, Math.trunc(configuredMaxAttempts)))
+      : 3;
     this.delay = options.delay ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   }
 
@@ -197,16 +210,21 @@ export class OpenRouterClient {
       cacheHit: false,
     };
     const requestId = optionalHeader(response.headers, 'x-request-id') ?? data.id;
+    const provider = data.openrouter_metadata?.endpoints?.available
+      ?.find(endpoint => endpoint.selected === true && typeof endpoint.provider === 'string')
+      ?.provider;
+    const taskType = data.openrouter_metadata?.pipeline
+      ?.map(stage => stage.data?.task_type)
+      .find(value => typeof value === 'string');
     if (requestId !== undefined) receipt.requestId = requestId;
     if (data.model !== undefined) receipt.selectedModel = data.model;
-    if (data.provider !== undefined) receipt.provider = data.provider;
+    if (provider !== undefined) receipt.provider = provider;
     if (route.costTier !== undefined) receipt.costTier = route.costTier;
-    if (data.task_type !== undefined) receipt.taskType = data.task_type;
+    if (taskType !== undefined) receipt.taskType = taskType;
     if (usage?.prompt_tokens !== undefined) receipt.promptTokens = usage.prompt_tokens;
     if (usage?.completion_tokens !== undefined) receipt.completionTokens = usage.completion_tokens;
     if (usage?.total_tokens !== undefined) receipt.totalTokens = usage.total_tokens;
     if (usage?.cost !== undefined) receipt.costUsd = usage.cost;
-    if (data.fallback_used !== undefined) receipt.fallbackUsed = data.fallback_used;
 
     return {answer, receipt};
   }

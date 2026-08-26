@@ -159,3 +159,12 @@ OpenRouter 16/16 and adjacent server suites 15/15. A missing, non-string, empty,
 or whitespace-only first completion now raises single-attempt
 `INVALID_PROVIDER_RESPONSE` before receipt construction or cache insertion, so
 an identical later consultation reaches the provider again.
+
+Nested-metadata/retry RED: OpenRouter ran 20 tests with 3 failures: obsolete
+top-level provider/task values won, NaN produced zero attempts and the generic
+error, and negative infinity produced one attempt. GREEN: OpenRouter 20/20,
+contracts 10/10, and adjacent server suites 15/15. Receipt provider now comes
+only from the nested available endpoint with `selected === true`; task type
+comes only from a nested pipeline stage `data.task_type`; top-level provider,
+task, and fallback fields are ignored. Non-finite attempt configuration safely
+defaults to three, while finite values are truncated and clamped to 1–3.

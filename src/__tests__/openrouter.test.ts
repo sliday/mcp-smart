@@ -130,6 +130,36 @@ describe('OpenRouterClient', () => {
     }
   });
 
+  it('normalizes only observed nested OpenRouter provider and task metadata', async () => {
+    post.mockResolvedValue(response({
+      provider: 'obsolete-top-level-provider',
+      task_type: 'obsolete-top-level-task',
+      fallback_used: true,
+      choices: [{message: {content: 'ok'}}],
+      openrouter_metadata: {
+        endpoints: {
+          available: [
+            {provider: 'Provider A', selected: false},
+            {provider: 'Provider B', selected: true},
+            {provider: 'Provider C', selected: false},
+          ],
+        },
+        pipeline: [
+          {type: 'unrelated', data: {value: 'ignored'}},
+          {type: 'classification', data: {task_type: 'coding'}},
+        ],
+      },
+    }) as never);
+
+    const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
+
+    expect(result.receipt).toMatchObject({
+      provider: 'Provider B',
+      taskType: 'coding',
+    });
+    expect(result.receipt).not.toHaveProperty('fallbackUsed');
+  });
+
   it('rejects a malformed successful response without retrying', async () => {
     post.mockResolvedValue(response({choices: [{message: {}}]}) as never);
     const client = new OpenRouterClient({
@@ -171,6 +201,23 @@ describe('OpenRouterClient', () => {
     await expect(client.consult({task: 'x'})).rejects.toMatchObject({details: {code}});
     expect(post).toHaveBeenCalledTimes(3);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'uses a bounded default attempt count for non-finite maxAttempts %s',
+    async maxAttempts => {
+      post.mockRejectedValue({response: {status: 503, headers: {}}});
+      const client = new OpenRouterClient({
+        apiKey: 'key',
+        maxAttempts,
+        delay: async () => undefined,
+      });
+
+      await expect(client.consult({task: 'x'})).rejects.toMatchObject({
+        details: {code: 'NO_PROVIDER_AVAILABLE'},
+      });
+      expect(post).toHaveBeenCalledTimes(3);
+    },
+  );
 });
 
 describe('normalizeOpenRouterError', () => {
