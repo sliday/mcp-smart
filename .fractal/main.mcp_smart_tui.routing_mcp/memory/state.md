@@ -37,17 +37,29 @@ parent-owned project file differs from the dispatcher baseline.
 - OpenRouter RED: 1 failed file and 0 collected tests because
   `../openrouter.js` was absent. GREEN: 1 passed file and 13 passed tests;
   adjacent suites passed 3 files and 42 tests.
+- Cancellation seam RED: 1 failed and 13 passed OpenRouter tests because Axios
+  received no signal. GREEN: 1 passed file and 14 passed tests after the
+  optional client signal was forwarded.
 - MCP RED: 2 failed files and 11 failed tests on the legacy advertised tools,
   required model, text-only output, and missing diagnostics/errors. GREEN: 2
   passed files and 11 passed tests.
 
 ## Verification
 
-The required focused commands pass with 8, 13, and 11 tests respectively.
+The required focused commands pass with 8, 14, and 11 tests respectively.
 `npm run build`, `git diff --check`, and the node lint script exit 0. The node
-test script exits 0 with 6 passed files, 48 passed tests, and a successful
+test script exits 0 with 6 passed files, 49 passed tests, and a successful
 TypeScript build.
 
 Context7 was absent from the callable tool registry. Installed Axios 1.x and MCP
 SDK 1.15.1 declarations plus repository tests were the verified documentation
 fallback, and the blocker was reported before API implementation.
+
+## Cancellation seam inspection
+
+The production module imports Axios as its default export and exposes
+`OpenRouterClient.consult(input: ConsultInput): Promise<ConsultationResult>`.
+The focused test mocks `axios.post` directly. Installed Axios 1.x declares
+`AxiosRequestConfig.signal?: GenericAbortSignal`. `OpenRouterClientOptions` now
+accepts an optional `AbortSignal` and forwards it to the Axios request without
+changing the public `consult(input)` signature or retry ceiling.

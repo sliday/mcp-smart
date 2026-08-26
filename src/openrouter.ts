@@ -26,6 +26,7 @@ interface OpenRouterResponse {
 
 export interface OpenRouterClientOptions {
   apiKey?: string;
+  signal?: AbortSignal;
   maxTokens?: number;
   timeoutMs?: number;
   maxAttempts?: number;
@@ -175,6 +176,7 @@ export class OpenRouterClient {
         'X-OpenRouter-Metadata': 'enabled',
       },
       timeout: this.options.timeoutMs ?? 30_000,
+      signal: this.options.signal,
     });
     const data = response.data;
     const usage = data.usage;

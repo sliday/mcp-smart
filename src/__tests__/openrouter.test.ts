@@ -90,6 +90,18 @@ describe('OpenRouterClient', () => {
     expect(post.mock.calls[0][1]).not.toHaveProperty('plugins');
   });
 
+  it('forwards an optional cancellation signal to Axios', async () => {
+    post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
+    const controller = new AbortController();
+    const client = new OpenRouterClient({apiKey: 'key', signal: controller.signal});
+
+    await client.consult({task: 'x'});
+
+    expect(post.mock.calls[0][2]).toEqual(expect.objectContaining({
+      signal: controller.signal,
+    }));
+  });
+
   it('does not invent absent response metadata', async () => {
     post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
     const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
