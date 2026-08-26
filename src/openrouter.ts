@@ -72,7 +72,9 @@ export function normalizeOpenRouterError(error: unknown): SmartErrorDetails {
   const retry = retryAfterMs(responseHeader(error, 'retry-after'));
 
   let details: SmartErrorDetails;
-  if (status === 401) {
+  if (record.code === 'ERR_CANCELED') {
+    details = {code: 'REQUEST_CANCELLED', message: 'The OpenRouter request was cancelled.', action: 'Retry when ready.'};
+  } else if (status === 401) {
     details = {code: 'AUTHENTICATION_FAILED', message: 'OpenRouter authentication failed.', action: 'Check OPENROUTER_API_KEY and try again.'};
   } else if (status === 402) {
     details = {code: 'INSUFFICIENT_CREDITS', message: 'OpenRouter credits are insufficient.', action: 'Add credits or choose a lower-cost route.'};

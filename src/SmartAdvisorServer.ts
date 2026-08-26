@@ -12,7 +12,7 @@ import {
   type ConsultationResult,
   type SmartErrorDetails,
 } from './contracts.js';
-import { OpenRouterClient } from './openrouter.js';
+import { OpenRouterClient, OpenRouterError } from './openrouter.js';
 
 enum LogLevel {
   ERROR = 0,
@@ -416,7 +416,10 @@ class CircuitBreaker {
     };
   }
 
-  public async execute<T>(operation: () => Promise<T>): Promise<T> {
+  public async execute<T>(
+    operation: () => Promise<T>,
+    shouldCountFailure: (error: unknown) => boolean = () => true,
+  ): Promise<T> {
     this.metrics.totalRequests++;
 
     if (this.metrics.state === CircuitBreakerState.OPEN) {
@@ -447,7 +450,7 @@ class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      this.onFailure();
+      if (shouldCountFailure(error)) this.onFailure();
       throw error;
     }
   }
@@ -498,6 +501,12 @@ class CircuitBreaker {
     this.halfOpenCalls = 0;
     this.logger.info('Circuit breaker manually reset');
   }
+}
+
+function isTransientProviderFailure(error: unknown): boolean {
+  if (!(error instanceof OpenRouterError)) return false;
+  return ['REQUEST_TIMEOUT', 'NO_PROVIDER_AVAILABLE', 'PROVIDER_UNAVAILABLE']
+    .includes(error.details.code);
 }
 
 export class SmartAdvisorServer {
@@ -809,7 +818,7 @@ export class SmartAdvisorServer {
     });
     const breaker = this.circuitBreakers.get('openrouter');
     const result = breaker
-      ? await breaker.execute(() => client.consult(input))
+      ? await breaker.execute(() => client.consult(input), isTransientProviderFailure)
       : await client.consult(input);
     this.consultationCache.set(cacheKey, {result, timestamp: Date.now()});
     if (this.consultationCache.size > this.config.maxCacheSize) {

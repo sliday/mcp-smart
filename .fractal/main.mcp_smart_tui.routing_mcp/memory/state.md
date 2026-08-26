@@ -92,3 +92,47 @@ or production edit has started: reserve mode activated immediately before
 EXECUTE. Resume with boundary 1 preflight, focused circuit-breaker RED, and the
 integration environment restoration; retain the saved directive until all five
 boundaries are green.
+
+## Correction implementation evidence
+
+The production preflight confirms `SmartAdvisorServer` imports MCP `Server`,
+`CallToolRequestSchema`, and `ListToolsRequestSchema`, registers the call handler
+as `return this.callTool(request.params.name, request.params.arguments)`, and
+keeps `listTools(): Promise<any>`, `callTool(name: string, args: any):
+Promise<any>`, and `run()` public. `CircuitBreaker.execute(operation)` currently
+counts every rejection, even though `OpenRouterClient.consult(input:
+ConsultInput): Promise<ConsultationResult>` wraps stable permanent failures in
+`OpenRouterError.details`. Axios 1.10.0 declares
+`AxiosRequestConfig.signal?: GenericAbortSignal` and cancellation code
+`ERR_CANCELED`. The integration suite snapshots only `OPENROUTER_API_KEY` and
+leaks `RATE_LIMIT_REQUESTS`.
+
+The contract/OpenRouter preflight confirms `resolveRoute(input: ConsultInput):
+ResolvedRoute` treats `smart-auto` as the literal direct model rather than the
+required `openai/gpt-5-mini` compatibility route. It can also retain a
+`costTier` for direct models even though no Auto plugin applies it.
+
+Installed MCP SDK 1.15.1 declares `InMemoryTransport.createLinkedPair():
+[InMemoryTransport, InMemoryTransport]`, `new Client(Implementation)`,
+`Client.connect(transport)`, and `Client.callTool(params, resultSchema?,
+options?)`. `CallToolResult` permits `content`, `structuredContent`, and
+`isError`; its declaration says tool-originated errors should use `isError:
+true` rather than protocol errors. The current MCP handler lets domain errors
+escape, so the actual transport converts them to JSON-RPC internal errors.
+
+`OpenRouterClient.send()` currently accepts empty/missing completion text as an
+empty answer, reads obsolete top-level `provider`, `task_type`, and
+`fallback_used`, and derives `maxAttempts` with a NaN-unsafe clamp. The observed
+nested response shape to cover is `openrouter_metadata.endpoints.available[]`
+with `selected === true` and `openrouter_metadata.pipeline[].data.task_type`.
+Context7 is unavailable in the callable registry, so installed declarations and
+tests are the verified documentation fallback.
+
+Circuit/environment RED: the two focused server files ran 13 tests with 2
+failures: a 401 opened the threshold-1 breaker and cancellation normalized as
+`PROVIDER_UNAVAILABLE`. GREEN: both files passed all 13 tests; adjacent
+OpenRouter passed all 14. Canonical breaker accounting now counts only stable
+transient provider-availability errors, cancellation is `REQUEST_CANCELLED`
+and non-retryable, and integration teardown exactly restores or deletes both
+`OPENROUTER_API_KEY` and `RATE_LIMIT_REQUESTS` according to their initial
+presence.

@@ -8,7 +8,16 @@ vi.mock('axios', async importOriginal => {
 });
 
 const post = vi.mocked(axios.post);
-const originalKey = process.env.OPENROUTER_API_KEY;
+const originalEnv = {
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  RATE_LIMIT_REQUESTS: process.env.RATE_LIMIT_REQUESTS,
+};
+
+function restoreEnv(name: keyof typeof originalEnv) {
+  const value = originalEnv[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 describe('canonical MCP integration', () => {
   let server: SmartAdvisorServer;
@@ -20,7 +29,8 @@ describe('canonical MCP integration', () => {
   });
 
   afterAll(() => {
-    process.env.OPENROUTER_API_KEY = originalKey;
+    restoreEnv('OPENROUTER_API_KEY');
+    restoreEnv('RATE_LIMIT_REQUESTS');
   });
 
   it('lists only the canonical tool surface', async () => {

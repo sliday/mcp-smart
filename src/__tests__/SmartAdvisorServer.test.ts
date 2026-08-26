@@ -114,4 +114,47 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     await expect(server.callTool('consult', {task: 'two'})).rejects.toMatchObject({details: {code: 'CIRCUIT_BREAKER_OPEN'}});
     expect(post).toHaveBeenCalledTimes(3);
   });
+
+  it('does not open the circuit breaker for a permanent provider error', async () => {
+    process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
+    post
+      .mockRejectedValueOnce({response: {status: 401, headers: {}}})
+      .mockResolvedValueOnce(providerResponse('recovered') as never);
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'bad credentials'})).rejects.toMatchObject({
+      details: {code: 'AUTHENTICATION_FAILED'},
+    });
+    await expect(server.callTool('consult', {task: 'credentials fixed'})).resolves.toMatchObject({
+      structuredContent: {answer: 'recovered'},
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(server.getCircuitBreakerMetrics().openrouter).toMatchObject({
+      state: 'CLOSED',
+      failures: 0,
+      consecutiveFailures: 0,
+    });
+  });
+
+  it('does not retry or poison the circuit breaker after cancellation', async () => {
+    process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
+    post
+      .mockRejectedValueOnce({code: 'ERR_CANCELED'})
+      .mockResolvedValueOnce(providerResponse('next request') as never);
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'cancel me'})).rejects.toMatchObject({
+      details: {code: 'REQUEST_CANCELLED'},
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+    await expect(server.callTool('consult', {task: 'try again'})).resolves.toMatchObject({
+      structuredContent: {answer: 'next request'},
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(server.getCircuitBreakerMetrics().openrouter).toMatchObject({
+      state: 'CLOSED',
+      failures: 0,
+      consecutiveFailures: 0,
+    });
+  });
 });
