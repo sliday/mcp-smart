@@ -1,6 +1,6 @@
 ---
-description: "Comprehensive task analysis using four specialist sub-agents"
-allowed-tools: ["mcp__Smart__smart_advisor", "mcp__Smart__expert_opinion", "mcp__Smart__smart_llm", "mcp__Smart__code_review"]
+description: "Analyze a task through focused architecture, implementation, and verification consultations"
+allowed-tools: ["mcp__Smart__consult", "mcp__Smart__smart_doctor", "mcp__Smart__smart_status"]
 ---
 
 # Smart Task Analysis
@@ -12,142 +12,91 @@ $ARGUMENTS
 - Task description: $ARGUMENTS
 - Relevant code or files will be referenced ad-hoc using @ file syntax.
 
-## Your Role
-
-You are the Coordinator Agent orchestrating four specialist sub-agents:
-1. **Architect Agent** – designs high-level approach using mcp__Smart__smart_advisor
-2. **Research Agent** – gathers external knowledge and precedent using mcp__Smart__expert_opinion  
-3. **Coder Agent** – writes or edits code using mcp__Smart__smart_llm
-4. **Tester Agent** – proposes tests and validation strategy using mcp__Smart__code_review
-
 ## Process
 
-1. Think step-by-step, laying out assumptions and unknowns.
-2. For each sub-agent, clearly delegate its task using appropriate MCP commands, capture its output, and summarise insights.
-3. Perform a "smart reflection" phase where you combine all insights to form a cohesive solution.
-4. If gaps remain, iterate (spawn sub-agents again) until confident.
+1. Check `smart_status` when route health or cache state could change the recommendation.
+2. Use `consult` for the smallest set of independent perspectives the task needs.
+3. Set `intent` to `code-review` for code assessment or `expert-opinion` for a specialist perspective. Use `advice` for architecture and implementation guidance.
+4. Combine agreements, disagreements, and trade-offs into one recommendation.
+5. End with concrete implementation and verification steps.
 
 ## Output Format
 
-1. **Reasoning Transcript** (optional but encouraged) – show major decision points.
-2. **Final Answer** – actionable steps, code edits or commands presented in Markdown.
-3. **Next Actions** – bullet list of follow-up items for the team (if any).
+1. Decision and rationale
+2. Implementation steps or code changes
+3. Verification evidence and remaining risks
 
 ---
 
-## Available MCP Smart Commands
+## Canonical MCP Commands
 
-### Core Advisory Commands
+### `mcp__Smart__consult`
 
-#### `mcp__Smart__smart_advisor`
-**Primary technical guidance with 4-persona approach**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Comprehensive technical problems requiring multi-perspective analysis
-- **Prompt structure**: Manager → CTO → QA → Engineer workflow
+Runs one OpenRouter consultation. It returns readable text plus a typed receipt when OpenRouter supplies route, model, latency, token, cache, or cost metadata.
 
-#### `mcp__Smart__expert_opinion` 
-**Third-party expert consultation**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Industry-specific knowledge and best practices
-- **Focus**: External perspective and precedent research
+Required parameter:
 
-#### `mcp__Smart__get_advice`
-**General coding mentorship**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Learning-oriented questions and guidance
-- **Focus**: Educational approach with explanations
+- `task`: Non-empty task text.
 
-### Code Quality Commands
+Optional parameters:
 
-#### `mcp__Smart__code_review`
-**Comprehensive code analysis**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Detailed code quality assessment
-- **Focus**: Security, performance, maintainability, best practices
+- `context`: Project context preserved as supplied.
+- `intent`: `advice`, `code-review`, or `expert-opinion`.
+- `preset`: `fast`, `balanced`, `best`, or `custom`.
+- `model`: A direct OpenRouter model ID up to 256 characters. `preset: "custom"` requires it.
+- `costTier`: `low`, `medium`, `high`, `xhigh`, or `max` for OpenRouter Auto.
+- `allowedModels` and `excludedModels`: OpenRouter model ID lists with up to 100 entries of 256 characters each.
+- `maxTokens`: Integer response limit from 1 through 200000.
+- `sessionId`: Cache isolation key up to 256 characters.
+- `fresh`: Bypass a cached response when `true`.
 
-#### `mcp__Smart__review_code`
-**Detailed code feedback**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: In-depth code examination with improvement suggestions
-- **Focus**: Code quality and optimization
+### `mcp__Smart__smart_doctor`
 
-#### `mcp__Smart__smart_llm`
-**AI-powered code analysis**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Intelligent code suggestions and pattern recognition
-- **Focus**: Advanced AI insights for complex coding challenges
+Reports the Node.js version, whether an API key exists, and the configured token and request-timeout defaults without exposing the key. Run `mcp-smart doctor` for terminal, OpenRouter authentication, and default-route checks.
 
-#### `mcp__Smart__ask_expert`
-**Professional consultation**
-- **Model options**: auto, intelligence, premium, cost, balance, speed, random, all
-- **Use case**: Professional-level technical guidance
-- **Focus**: Industry expertise and professional practices
+### `mcp__Smart__smart_status`
 
----
+Reports service health, circuit breakers, cache metrics, rate-limit state, and the package version.
 
-## Model Routing Strategies
+## Routing
 
-### Intelligence Levels
-- **intelligence**: Claude Sonnet 4 (ultimate reasoning)
-- **premium**: OpenAI o3 (high-end reasoning)
-- **auto**: GPT-4o-mini intelligently selects the best provider
+- `fast`: OpenRouter Auto with a low cost tier.
+- `balanced`: OpenRouter Auto with a medium cost tier.
+- `best`: OpenRouter Auto with the max cost tier.
+- `custom`: A direct OpenRouter model ID supplied in `model`.
 
-### Performance Optimized
-- **speed**: xAI Grok (fast responses) 
-- **balance**: Google Gemini Flash (cost/performance balance)
-- **cost**: DeepSeek (budget-friendly)
-
-### Special Options
-- **random**: Randomly select from available providers
-- **all**: Multi-provider consultation (all providers)
-
----
-
-## Command Parameters
-
-All commands accept these parameters:
-
-```json
-{
-  "model": "auto|intelligence|premium|cost|balance|speed|random|all|deepseek|google|openai|xai|claude",
-  "task": "The coding task or problem description",
-  "context": "Additional project context (optional)"
-}
-```
+OpenRouter chooses the provider for Auto routes. A receipt may name the selected provider and model when OpenRouter returns that metadata.
 
 ## Usage Examples
 
-### Smart Task Example
+```yaml
+mcp__Smart__consult:
+  task: "Review the authentication middleware for failure modes"
+  context: "Node.js MCP server; preserve public error codes"
+  intent: "code-review"
+  preset: "balanced"
+  sessionId: "auth-review"
 ```
-/smart Implement a distributed caching system with Redis
 
-Context: Node.js microservices architecture, need horizontal scaling
+For a direct model:
+
+```yaml
+mcp__Smart__consult:
+  task: "Compare two cache invalidation strategies"
+  intent: "expert-opinion"
+  preset: "custom"
+  model: "openai/gpt-5"
+  fresh: true
 ```
 
-### Individual Command Examples
-```
-mcp__Smart__smart_advisor:
-- model: "intelligence" 
-- task: "Design microservices communication patterns"
-- context: "E-commerce platform with 10M+ users"
+## Compatibility
 
-mcp__Smart__code_review:
-- model: "premium"
-- task: "Review authentication middleware implementation"
-- context: "Security-critical banking application"
-```
+Version 2 advertises `consult`, `smart_doctor`, and `smart_status`. The seven version 1 consultation names remain callable as hidden aliases for existing clients.
 
 ## Integration with Claude Code
 
 Add to your `~/.claude/CLAUDE.md`:
 
 ```markdown
-When facing uncertainty and needing advice, you have exclusive access to Smart advisor. Use these MCP commands:
-- smart_advisor (comprehensive technical guidance)
-- code_review (detailed code analysis) 
-- expert_opinion (industry expertise)
-- smart_llm (AI-powered insights)
-- get_advice (mentorship approach)
-- ask_expert (professional consultation)
-- review_code (quality assessment)
+When a technical decision needs an independent perspective, call Smart's `consult` tool. Use `smart_doctor` for setup problems and `smart_status` for route health.
 ```

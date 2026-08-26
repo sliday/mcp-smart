@@ -14,7 +14,7 @@ mcp-smart ask "Review this API design for failure modes"
 mcp-smart tui
 ```
 
-`mcp-smart doctor` checks Node.js, terminal support, key presence, OpenRouter authentication, and the local OpenRouter Auto configuration. MCP Smart reads the key from `OPENROUTER_API_KEY`; it does not save the key.
+`mcp-smart doctor` checks Node.js, terminal support, key presence, OpenRouter authentication, and the local OpenRouter Auto configuration. It exits with a nonzero status when a required check fails or the key is missing. MCP Smart reads the key from `OPENROUTER_API_KEY`; it does not save the key.
 
 Run `mcp-smart init` for copyable setup guidance. Add `--json` to `init`, `doctor`, or `ask` when a script needs structured output.
 
@@ -23,7 +23,7 @@ Run `mcp-smart init` for copyable setup guidance. Add `--json` to `init`, `docto
 Run `mcp-smart tui` to open the Ink interface in the terminal alternate screen. The interface includes:
 
 - Consult, for one routed answer
-- Compare, for two advisor perspectives with partial results when one request fails
+- Compare, for two to four selected advisor perspectives with partial results when a request fails
 - Doctor, for environment and OpenRouter checks
 - Setup, for key and MCP client instructions
 - Last Receipt, for the latest route, model, latency, token, and cost data
@@ -32,10 +32,14 @@ The layout uses a navigation rail at 80 columns or wider and a compact header in
 
 Choose Custom to enter a direct OpenRouter model ID. MCP Smart keeps one session ID for the TUI conversation so repeated Auto requests retain route affinity.
 
+Compare starts with two direct advisors selected. Move through the visible model checklist with the arrow keys, press `Space` to select two to four models, and press `a` to show or hide full answers after the comparison finishes.
+
 | Key | Action |
 | --- | --- |
 | `Tab`, `Shift+Tab` | Move focus |
-| Arrow keys | Move through navigation or presets |
+| Arrow keys | Move through navigation, presets, or Compare advisors |
+| `Space` | Select or clear the focused Compare advisor |
+| `a` | Show or hide full Compare answers |
 | `Enter` | Confirm or submit |
 | `Shift+Enter` | Insert a newline in the editor |
 | `Esc` | Return to navigation |
@@ -85,7 +89,7 @@ MCP Smart advertises three tools:
 | Tool | Purpose |
 | --- | --- |
 | `consult` | Run advice, code review, or an expert opinion |
-| `smart_doctor` | Inspect runtime and provider configuration |
+| `smart_doctor` | Report Node.js, API-key presence, and local token and timeout defaults |
 | `smart_status` | Inspect cache, rate limits, and circuit breakers |
 
 Only `task` is required for `consult`:
@@ -108,15 +112,24 @@ The full input supports:
 | `context` | Optional supporting text |
 | `intent` | `advice`, `code-review`, `expert-opinion` |
 | `preset` | `fast`, `balanced`, `best`, `custom` |
-| `model` | `openrouter/auto`, `smart-auto`, or a direct OpenRouter model ID |
+| `model` | `openrouter/auto`, `smart-auto`, or a direct OpenRouter model ID, up to 256 characters; required for `custom` |
 | `costTier` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `allowedModels` | Auto router allowlist |
-| `excludedModels` | Auto router blocklist |
-| `maxTokens` | Positive integer |
-| `sessionId` | Route-affinity session identifier |
+| `allowedModels` | Auto router allowlist, up to 100 IDs of 256 characters each |
+| `excludedModels` | Auto router blocklist, up to 100 IDs of 256 characters each |
+| `maxTokens` | Integer from 1 through 200000 |
+| `sessionId` | Route-affinity session identifier, up to 256 characters |
 | `fresh` | Skip cache reads when `true` |
 
 Existing clients may keep calling `smart_advisor`, `code_review`, `get_advice`, `expert_opinion`, `smart_llm`, `ask_expert`, and `review_code`. MCP Smart accepts those aliases but omits them from tool discovery.
+
+### Optional Claude Code command
+
+The npm package includes `smart.md`, an optional `/smart` command that uses the three canonical tools. After a global install, copy it into Claude Code's user command directory:
+
+```zsh
+mkdir -p ~/.claude/commands
+cp "$(npm root -g)/mcp-smart/smart.md" ~/.claude/commands/smart.md
+```
 
 ## OpenRouter routing
 
@@ -135,7 +148,7 @@ The OpenRouter client stops after three attempts. It stops at the first rate-lim
 
 ## Receipts
 
-Each successful consultation returns readable content and typed receipt data:
+Each successful canonical `consult` call returns readable content and typed receipt data:
 
 ```json
 {
@@ -157,6 +170,8 @@ Each successful consultation returns readable content and typed receipt data:
 }
 ```
 
+The hidden legacy `model: "all"` compatibility route keeps its text-only multi-advisor response.
+
 OpenRouter may omit model, provider, token, task classification, or cost metadata. MCP Smart leaves absent values out of the receipt.
 
 Cache identity includes intent, prompt version, route, preset, Auto restrictions, token limit, session ID, task, and context. A cache hit reports its age when available.
@@ -177,7 +192,6 @@ Cache identity includes intent, prompt version, route, preset, Auto restrictions
 | `RATE_LIMIT_WINDOW` | `60000` | Local rate-limit window in milliseconds |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Failures before opening a circuit |
 | `CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | `60000` | Open-circuit recovery delay in milliseconds |
-| `CIRCUIT_BREAKER_MONITORING_PERIOD` | `300000` | Circuit monitoring window in milliseconds |
 | `CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS` | `3` | Trial calls in half-open state |
 
 ## Development
@@ -191,6 +205,8 @@ npm test -- --run
 ```
 
 Run the stdio server from source with `npm run dev`. Run the built CLI with `node dist/index.js --help`.
+
+See the [project wiki](wiki/_index.md), [architecture index](wiki/architecture/_index.md), and [runtime dispatch notes](wiki/architecture/runtime_dispatch.md) for the CLI-to-MCP boundary.
 
 ## License and support
 

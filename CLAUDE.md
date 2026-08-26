@@ -11,9 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Core Components
 
 - **SmartAdvisorServer** (`src/SmartAdvisorServer.ts`): Main server class implementing MCP protocol
-  - Manages 7 tool aliases that share the same underlying functionality
-  - Tools: `smart_advisor`, `code_review`, `get_advice`, `expert_opinion`, `smart_llm`, `ask_expert`, `review_code`
-  - Each tool routes to AI providers with specialized system prompts based on tool role
+  - Advertises `consult`, `smart_doctor`, and `smart_status`
+  - Keeps `smart_advisor`, `code_review`, `get_advice`, `expert_opinion`, `smart_llm`, `ask_expert`, and `review_code` callable as hidden compatibility aliases
+  - Routes consultations through OpenRouter with specialized prompts based on intent or legacy tool role
 
 - **CircuitBreaker** (within `SmartAdvisorServer.ts`): Individual circuit breakers per provider
   - States: CLOSED (healthy), OPEN (failing), HALF_OPEN (testing recovery)
@@ -84,8 +84,13 @@ npm run test:coverage
 - Tests located in `src/__tests__/`
 - Current test files:
   - `SmartAdvisorServer.test.ts`: Unit tests for core server functionality
+  - `cli.test.ts`: Command parsing, output, and exit behavior
+  - `commands.test.ts`: Setup, Doctor, and ask workflows
+  - `contracts.test.ts`: Route and cache-key contracts
   - `integration.test.ts`: Integration tests
+  - `openrouter.test.ts`: OpenRouter payload, receipt, retry, and error handling
   - `prompt.test.ts`: Prompt generation tests
+  - `tui.test.tsx`: Ink interface behavior
 - Mock axios for API calls in tests
 - Test coverage tracked with v8 provider
 
@@ -110,7 +115,7 @@ All configuration via environment variables (see `loadConfig()` in SmartAdvisorS
 - `MAX_RETRIES=3`: Retry attempts for failed requests
 - `REQUEST_TIMEOUT=30000`: Request timeout in milliseconds
 - `CACHE_TTL=300000`: Cache time-to-live (5 minutes)
-- `MAX_TOKENS=4000`: Maximum tokens per request
+- `MAX_TOKENS=4000`: Default tokens per request
 - `MAX_CACHE_SIZE=100`: Maximum cached responses
 - `MAX_TASK_LENGTH=10000`: Maximum task input length
 - `MAX_CONTEXT_LENGTH=20000`: Maximum context input length
@@ -120,7 +125,6 @@ All configuration via environment variables (see `loadConfig()` in SmartAdvisorS
 ### Circuit Breaker Configuration
 - `CIRCUIT_BREAKER_FAILURE_THRESHOLD=5`: Consecutive failures before opening
 - `CIRCUIT_BREAKER_RECOVERY_TIMEOUT=60000`: Recovery attempt timeout (1 minute)
-- `CIRCUIT_BREAKER_MONITORING_PERIOD=300000`: Monitoring window (5 minutes)
 - `CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS=3`: Max calls in half-open state
 
 ## Key Implementation Details
@@ -145,7 +149,7 @@ The system uses `buildToolSpecificPrompt()` to customize prompts based on tool n
 ### Caching Strategy
 
 - LRU (Least Recently Used) cache implementation
-- Cache key: `${provider}:${task}:${context}`
+- Cache keys include intent, prompt version, route, Auto restrictions, token override, session, task, and context
 - Tracks hits, misses, evictions, and hit rate
 - Evicts least recently used when max size reached
 - TTL-based expiration with automatic cleanup
@@ -163,7 +167,7 @@ When `model: "all"` is specified:
 This MCP server is designed to integrate with Claude Code. Users add configuration to `~/.claude/CLAUDE.md`:
 
 ```markdown
-When facing uncertainty and needing advice, you have exclusive access to L7 Google programmer named Smart. Ask him when appropriate using these terms: smart_advisor, code_review, get_advice, expert_opinion, smart_llm.
+When a technical decision needs an independent perspective, call Smart's `consult` tool. Use `smart_doctor` for MCP server configuration and `smart_status` for route health.
 ```
 
 This creates a hook where Claude Code automatically invokes the MCP server when detecting relevant keywords in user prompts or system reasoning.
@@ -174,7 +178,7 @@ This creates a hook where Claude Code automatically invokes the MCP server when 
 - Current version: 2.0.0
 - Entry point: `dist/index.js` (built from `src/index.ts`)
 - Binary: `mcp-smart` command
-- Prepublish: Automatically runs the tests and `npm run build`
+- Prepack: Runs the tests and `npm run build`
 
 ## Project Structure
 
@@ -187,8 +191,20 @@ src/
     - SmartAdvisorServer class
   __tests__/
     SmartAdvisorServer.test.ts - Unit tests
+    cli.test.ts                - CLI tests
+    commands.test.ts           - Command workflow tests
+    contracts.test.ts          - Route contract tests
     integration.test.ts        - Integration tests
+    openrouter.test.ts         - OpenRouter client tests
     prompt.test.ts             - Prompt tests
+    tui.test.tsx               - Terminal UI tests
+
+  commands/                - CLI command workflows
+  tui/                     - Ink terminal interface
+  cli.ts                   - Command dispatcher
+  contracts.ts             - Public route and receipt types
+  openrouter.ts            - OpenRouter client
+  terminal.ts              - Terminal text sanitization
 
 dist/                      - Compiled JavaScript output
 package.json               - Package configuration
@@ -232,8 +248,8 @@ Use public methods:
 
 ## Important Gotchas
 
-1. **Router model excluded from main providers**: The `router` key in `MODELS` uses GPT-4o-mini for routing decisions, not for user-facing responses
+1. **Router model excluded from main providers**: The `router` key in `MODELS` uses GPT-5 Mini for routing decisions, not for user-facing responses
 2. **Circuit breaker state persistence**: Circuit breakers maintain state across requests within the same server instance
-3. **Cache key construction**: Cache keys include provider, so same task with different routing strategies may hit different cache entries
+3. **Cache key construction**: Cache keys include the resolved route, so the same task with different routing options uses different entries
 4. **Fallback hierarchy**: When circuit breaker opens, system uses intelligent fallback based on provider capabilities (google → claude → xai → moonshot → deepseek → openai)
 5. **Tool name matters**: Tool name affects system prompt via `buildToolSpecificPrompt()`, even though all tools share the same input schema
