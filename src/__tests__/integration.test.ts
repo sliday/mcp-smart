@@ -1,191 +1,102 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import axios from 'axios';
-import { SmartAdvisorServer } from '../SmartAdvisorServer.js';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {SmartAdvisorServer} from '../SmartAdvisorServer.js';
 
-vi.mock('axios', async (importOriginal) => {
-  const actual = await importOriginal() as any;
-  return {
-    ...actual,
-    default: {
-      post: vi.fn(),
-      AxiosError: actual.AxiosError
-    },
-    AxiosError: actual.AxiosError
-  };
+vi.mock('axios', async importOriginal => {
+  const actual = await importOriginal<typeof import('axios')>();
+  return {...actual, default: {post: vi.fn()}};
 });
 
-const mockedAxios = vi.mocked(axios);
+const post = vi.mocked(axios.post);
+const originalEnv = {
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  RATE_LIMIT_REQUESTS: process.env.RATE_LIMIT_REQUESTS,
+};
 
-describe('Integration Tests', () => {
+function restoreEnv(name: keyof typeof originalEnv) {
+  const value = originalEnv[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+describe('canonical MCP integration', () => {
   let server: SmartAdvisorServer;
-  const originalApiKey = process.env.OPENROUTER_API_KEY;
 
   beforeAll(() => {
-    if (!process.env.OPENROUTER_API_KEY) {
-      process.env.OPENROUTER_API_KEY = 'test-key-for-integration';
-    }
-    // Increase rate limits for testing
+    process.env.OPENROUTER_API_KEY = 'integration-key';
     process.env.RATE_LIMIT_REQUESTS = '100';
-    process.env.RATE_LIMIT_WINDOW = '60000';
-    // Disable caching for tests to avoid interference
-    process.env.CACHE_TTL = '0';
-    vi.clearAllMocks();
     server = new SmartAdvisorServer();
   });
 
   afterAll(() => {
-    process.env.OPENROUTER_API_KEY = originalApiKey;
+    restoreEnv('OPENROUTER_API_KEY');
+    restoreEnv('RATE_LIMIT_REQUESTS');
   });
 
-  describe('End-to-End Tool Flow', () => {
-    it('should handle complete tool workflow', async () => {
-      const tools = await server.listTools();
-      expect(tools.tools).toHaveLength(7);
-      expect(tools.tools[0].name).toBe('smart_advisor');
+  it('lists only the canonical tool surface', async () => {
+    const tools = await server.listTools();
+    expect(tools.tools.map((tool: {name: string}) => tool.name)).toEqual(['consult', 'smart_doctor', 'smart_status']);
+  });
 
-      const toolSchema = tools.tools[0].inputSchema;
-      expect(toolSchema.properties.model.enum).toContain('google');
-      expect(toolSchema.properties.model.enum).toContain('openai');
-      expect(toolSchema.properties.model.enum).toContain('deepseek');
-      expect(toolSchema.properties.model.enum).toContain('random');
-      expect(toolSchema.properties.model.enum).toContain('all');
-      expect(toolSchema.required).toEqual(['model', 'task']);
-    });
-
-    it('should validate required parameters', async () => {
-      await expect(server.callTool('smart_advisor', {
-        model: 'google'
-      })).rejects.toThrow();
-
-      await expect(server.callTool('smart_advisor', {
-        task: 'test task'
-      })).rejects.toThrow();
-    });
-
-    it('should handle all supported models', async () => {
-      const mockResponse = {
-        data: {
-          choices: [{
-            message: {
-              content: 'Mock response for integration test'
-            }
-          }]
-        }
-      };
-      
-      const models = ['google', 'openai', 'deepseek'];
-      
-      for (const model of models) {
-        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
-        const result = await server.callTool('smart_advisor', {
-          model,
-          task: 'Simple test task'
-        });
-        expect(result.content[0].text).toBe('Mock response for integration test');
-      }
-    });
-
-    it('should handle random model selection', async () => {
-      const mockResponse = {
-        data: {
-          choices: [{
-            message: {
-              content: 'Random provider response'
-            }
-          }]
-        }
-      };
-      
-      // Test random multiple times to ensure it's working
-      const results = [];
-      for (let i = 0; i < 5; i++) {
-        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
-        const result = await server.callTool('smart_advisor', {
-          model: 'random',
-          task: 'Test random provider selection'
-        });
-        expect(result.content[0].text).toBe('Random provider response');
-        results.push(result);
-      }
-      
-      // Verify all calls succeeded
-      expect(results).toHaveLength(5);
+  it('validates task but defaults routing when model is absent', async () => {
+    await expect(server.callTool('consult', {})).rejects.toMatchObject({details: {code: 'INVALID_INPUT'}});
+    post.mockResolvedValue({data: {choices: [{message: {content: 'ok'}}]}, headers: {}} as never);
+    await expect(server.callTool('consult', {task: 'works without model'})).resolves.toMatchObject({
+      content: [{type: 'text', text: 'ok'}],
+      structuredContent: {answer: 'ok'},
     });
   });
 
-  describe('Error Handling', () => {
-    it('should handle network timeouts gracefully', async () => {
-      vi.clearAllMocks();
-      (mockedAxios.post as any).mockRejectedValueOnce(new Error('Network timeout'));
-      
-      await expect(server.callTool('smart_advisor', {
-        model: 'google',
-        task: 'Unique-timeout-test-' + Math.random()
-      })).rejects.toThrow('Failed after');
-    });
-
-    it('should preserve error context', async () => {
-      try {
-        await server.callTool('smart_advisor', {
-          model: 'invalid-model' as any,
-          task: 'test'
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain('Unknown routing strategy');
-      }
-    });
+  it('keeps aliases hidden but callable', async () => {
+    post.mockResolvedValue({data: {choices: [{message: {content: 'legacy ok'}}]}, headers: {}} as never);
+    const result = await server.callTool('code_review', {task: 'review'});
+    expect(result.structuredContent.answer).toBe('legacy ok');
   });
 
-  describe('Input Validation', () => {
-    it('should handle edge cases in task input', async () => {
-      vi.clearAllMocks();
-      const mockResponse = {
-        data: {
-          choices: [{
-            message: {
-              content: 'Edge case response'
-            }
-          }]
-        }
-      };
-      
-      const edgeCases = [
-        { task: 'edge-case-unique-1-' + Math.random(), expectError: false },
-        { task: 'edge-case-unique-2-' + Math.random() + 'a'.repeat(50), expectError: false },
-        { task: 'edge-case-unique-3-' + Math.random() + '-special: @#$%^&*()', expectError: false }
-      ];
-
-      for (const testCase of edgeCases) {
-        (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
-        const result = await server.callTool('smart_advisor', {
-          model: 'google',
-          task: testCase.task
-        });
-        expect(result.content[0].text).toBe('Edge case response');
-      }
+  it('returns stable domain errors across the actual MCP transport', async () => {
+    post.mockRejectedValueOnce({
+      response: {
+        status: 401,
+        headers: {'x-request-id': 'safe-request-id'},
+      },
+      config: {
+        headers: {Authorization: 'Bearer must-not-leak'},
+        data: 'private prompt',
+      },
     });
+    const transportServer = new SmartAdvisorServer();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({name: 'integration-test', version: '1.0.0'});
+    await (transportServer as any).server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await client.listTools();
 
-    it('should handle optional context parameter', async () => {
-      vi.clearAllMocks();
-      const mockResponse = {
-        data: {
-          choices: [{
-            message: {
-              content: 'Context test response'
-            }
-          }]
-        }
-      };
-      
-      // Test just one case to avoid rate limits
-      (mockedAxios.post as any).mockResolvedValueOnce(mockResponse);
-      const result = await server.callTool('smart_advisor', {
-        model: 'deepseek',
-        task: 'Context-test-unique-task-' + Math.random(),
-        context: 'Simple context'
+    try {
+      const result = await client.callTool({
+        name: 'consult',
+        arguments: {task: 'transport failure'},
       });
-      expect(result.content[0].text).toBe('Context test response');
-    });
+      expect(result).toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: {
+            code: 'AUTHENTICATION_FAILED',
+            message: 'OpenRouter authentication failed.',
+            action: 'Check OPENROUTER_API_KEY and try again.',
+            requestId: 'safe-request-id',
+          },
+        },
+      });
+      expect(result.content).toEqual([{
+        type: 'text',
+        text: 'OpenRouter authentication failed. Action: Check OPENROUTER_API_KEY and try again. (AUTHENTICATION_FAILED)',
+      }]);
+      expect(JSON.stringify(result)).not.toContain('must-not-leak');
+      expect(JSON.stringify(result)).not.toContain('private prompt');
+    } finally {
+      await client.close();
+    }
   });
 });
