@@ -13,7 +13,7 @@ const ROUTES = ['Consult', 'Compare', 'Doctor', 'Setup', 'Last Receipt'] as cons
 type Route = typeof ROUTES[number];
 type Stage = 'Idle' | 'Routing request' | 'Requesting advisors' | 'Response received' | 'Cancelled' | 'Error';
 
-const ADVISOR_MODELS = ['anthropic/claude-sonnet-4.5', 'openai/gpt-5', 'google/gemini-3.1-pro-preview', 'x-ai/grok-4.6'] as const;
+const ADVISOR_MODELS = ['anthropic/claude-sonnet-5', 'openai/gpt-5', 'google/gemini-3.1-pro-preview', 'x-ai/grok-4.6'] as const;
 const MIN_COMPARE_ADVISORS = 2;
 const MAX_COMPARE_ADVISORS = 4;
 const MAX_SHARED_TERMS = 8;

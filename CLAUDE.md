@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mcp-smart** is an MCP (Model Context Protocol) server for routed and multi-advisor consultations through OpenRouter. Canonical consultations default to OpenRouter Auto. Hidden compatibility routes retain direct access to six models (Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, and Moonshot Kimi-K2 Thinking), caching, rate limiting, and circuit-breaker protection.
+**mcp-smart** is an MCP (Model Context Protocol) server for routed and multi-advisor consultations through OpenRouter. Canonical consultations default to OpenRouter Auto. Hidden compatibility routes retain direct access to six models (Claude Sonnet 5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, and Moonshot Kimi-K2 Thinking), caching, rate limiting, and circuit-breaker protection.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Hidden aliases accept these compatibility values in `model`:
 
 1. **`auto`**: Uses `openrouter/auto` with the Auto router plugin
-2. **`intelligence`**: Routes to Claude Sonnet 4.5
+2. **`intelligence`**: Routes to Claude Sonnet 5
 3. **`premium`**: Routes to OpenAI GPT-5 Pro
 4. **`speed`**: Routes to xAI Grok 4
 5. **`balance`**: Routes to Google Gemini 3 Pro

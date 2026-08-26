@@ -15,6 +15,7 @@
 - Aligned advertised MCP schemas with runtime validation for presets, custom OpenRouter model IDs, metadata, and legacy aliases.
 - Added route-aware navigation hints, truthful Doctor and Setup stages, nonzero Doctor exit codes for failed required checks, and documented environment settings for limits, retries, caching, and circuit breakers.
 - Return route, model, latency, token, cache, and cost metadata only when the provider supplies valid values.
+- Updated the Claude intelligence route and TUI advisor list to OpenRouter's Claude Sonnet 5 model ID.
 
 ### Fixed
 

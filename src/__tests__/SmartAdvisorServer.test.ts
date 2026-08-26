@@ -93,7 +93,7 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
   it('normalizes legacy alias model strategies to current OpenRouter routes', async () => {
     const routes = [
       ['auto', 'openrouter/auto'],
-      ['intelligence', 'anthropic/claude-sonnet-4.5'],
+      ['intelligence', 'anthropic/claude-sonnet-5'],
       ['premium', 'openai/gpt-5-pro'],
       ['cost', 'deepseek/deepseek-v3.2-exp'],
       ['balance', 'google/gemini-3.1-pro-preview'],
@@ -102,9 +102,9 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
       ['google', 'google/gemini-3.1-pro-preview'],
       ['openai', 'openai/gpt-5-pro'],
       ['xai', 'x-ai/grok-4.6'],
-      ['claude', 'anthropic/claude-sonnet-4.5'],
+      ['claude', 'anthropic/claude-sonnet-5'],
       ['moonshot', 'moonshotai/kimi-k2-thinking'],
-      ['random', 'anthropic/claude-sonnet-4.5'],
+      ['random', 'anthropic/claude-sonnet-5'],
     ] as const;
     const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     const server = new SmartAdvisorServer();

@@ -26,7 +26,7 @@ describe('OpenRouterClient', () => {
   it('sends the exact Auto shape, session metadata, and preserved input', async () => {
     post.mockResolvedValue(response({
       id: 'gen-1',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-5',
       choices: [{message: {content: 'Answer'}}],
       usage: {prompt_tokens: 10, completion_tokens: 20, total_tokens: 30, cost: 0.01},
     }, {'x-request-id': 'req-1'}) as never);
@@ -71,7 +71,7 @@ describe('OpenRouterClient', () => {
       receipt: expect.objectContaining({
         requestId: 'req-1',
         requestedModel: 'openrouter/auto',
-        selectedModel: 'anthropic/claude-sonnet-4.5',
+        selectedModel: 'anthropic/claude-sonnet-5',
         preset: 'balanced',
         costTier: 'medium',
         promptTokens: 10,
