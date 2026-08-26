@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mcp-smart** is an MCP (Model Context Protocol) server that provides intelligent AI routing and multi-advisor consultations through OpenRouter API. It routes requests to 6 premium AI providers (Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, Moonshot Kimi-K2 Thinking) with smart routing, caching, rate limiting, and circuit breaker protection.
+**mcp-smart** is an MCP (Model Context Protocol) server for routed and multi-advisor consultations through OpenRouter. Canonical consultations default to OpenRouter Auto. Hidden compatibility routes retain direct access to six models (Claude Sonnet 4.5, OpenAI GPT-5 Pro, xAI Grok 4, Google Gemini 3 Pro, DeepSeek v3.2, and Moonshot Kimi-K2 Thinking), caching, rate limiting, and circuit-breaker protection.
 
 ## Architecture
 
@@ -15,42 +15,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Keeps `smart_advisor`, `code_review`, `get_advice`, `expert_opinion`, `smart_llm`, `ask_expert`, and `review_code` callable as hidden compatibility aliases
   - Routes consultations through OpenRouter with specialized prompts based on intent or legacy tool role
 
-- **CircuitBreaker** (within `SmartAdvisorServer.ts`): Individual circuit breakers per provider
+- **CircuitBreaker** (within `SmartAdvisorServer.ts`): OpenRouter health protection for canonical and compatibility requests
   - States: CLOSED (healthy), OPEN (failing), HALF_OPEN (testing recovery)
   - Prevents cascading failures by opening circuits after consecutive failures
   - Automatic recovery testing with configurable timeouts
-  - Intelligent fallback to healthy providers when primary fails
+  - Manual resets invalidate stale half-open trial results
 
 - **Logger** (within `SmartAdvisorServer.ts`): Structured logging with context and log levels (ERROR, WARN, INFO, DEBUG)
 
-### Routing Strategies
+### Legacy Model Routes
 
-The system supports multiple routing strategies defined in `ROUTING_STRATEGIES`:
+Hidden aliases accept these compatibility values in `model`:
 
-1. **`auto`**: GPT-5 Mini intelligently selects optimal provider based on task complexity, cost, and requirements
-2. **`intelligence`**: Routes to Claude Sonnet 4.5 (ultimate reasoning)
-3. **`premium`**: Routes to OpenAI GPT-5 Pro (high-end reasoning)
-4. **`speed`**: Routes to xAI Grok 4 (fast responses)
-5. **`balance`**: Routes to Google Gemini 3 Pro (cost/performance balance)
-6. **`cost`**: Routes to DeepSeek v3.2 (budget-friendly)
+1. **`auto`**: Uses `openrouter/auto` with the Auto router plugin
+2. **`intelligence`**: Routes to Claude Sonnet 4.5
+3. **`premium`**: Routes to OpenAI GPT-5 Pro
+4. **`speed`**: Routes to xAI Grok 4
+5. **`balance`**: Routes to Google Gemini 3 Pro
+6. **`cost`**: Routes to DeepSeek v3.2
 7. **`random`**: Randomly selects from available providers
 8. **`all`**: Consults all providers and formats multi-advisor response
 9. **Direct providers**: `claude`, `openai`, `xai`, `google`, `deepseek`, `moonshot`
 
-### Provider Intelligence Hierarchy
+### Provider Set
 
-Ranked by reasoning capability (see `PROVIDER_SPECS`):
-1. Claude Sonnet 4.5 (ultimate)
-2. OpenAI GPT-5 Pro (highest)
-3. xAI Grok 4 / Google Gemini 3 Pro (very-high)
-4. DeepSeek v3.2 (high)
+The legacy `all` route queries six direct model IDs in parallel. The canonical `consult` route leaves provider selection to OpenRouter Auto unless the caller supplies a direct model ID.
 
 ### Security & Resilience
 
 - **Input Validation**: Length limits and sanitization
 - **Prompt Injection Detection**: Pattern matching for malicious inputs (script injection, prompt injection attempts)
 - **Rate Limiting**: Configurable requests per time window with per-client tracking
-- **Circuit Breakers**: Per-provider fault isolation with automatic failover
+- **Circuit Breaker**: OpenRouter fault isolation with bounded half-open recovery trials
 - **Caching**: LRU cache with TTL to reduce API costs
 - **Retry Logic**: Exponential backoff for transient failures
 
@@ -68,8 +64,8 @@ npm run dev
 # Start the built server
 npm start
 
-# Run all tests
-npm test
+# Run all tests once
+npm test -- --run
 
 # Run tests in watch mode
 npm test:watch
@@ -184,8 +180,8 @@ This creates a hook where Claude Code automatically invokes the MCP server when 
 
 ```
 src/
-  index.ts                 - Entry point, creates and runs server
-  SmartAdvisorServer.ts    - Main server implementation (1400+ lines)
+  index.ts                 - Executable wrapper around the CLI dispatcher
+  SmartAdvisorServer.ts    - Main server implementation (1600+ lines)
     - Logger class
     - CircuitBreaker class
     - SmartAdvisorServer class
@@ -218,17 +214,16 @@ vitest.config.ts           - Test configuration
 
 1. Add model to `MODELS` constant
 2. Add display name to `MODEL_NAMES`
-3. Add capabilities to `PROVIDER_SPECS`
-4. Update `ROUTING_STRATEGIES` enum if needed
-5. Circuit breaker automatically initialized for new provider
-6. Update README.md documentation
+3. Add compatibility values to `LEGACY_MODEL_ROUTES` when needed
+4. Add the model to the TUI Compare list if users should select it there
+5. Update tests and README.md documentation
 
 ### Adding a New Tool Alias
 
 1. Add tool to `TOOL_SPECIFIC_ROLES` with role, focus, description
-2. Add tool to `listTools()` return array with description
-3. Add tool name to `validTools` array in `callTool()`
-4. Tool will automatically use specialized prompt system
+2. Add the name to the hidden alias list in `callTool()`
+3. Update `resolveIntent()` if the alias maps to review or expert opinion
+4. Add compatibility tests; do not add the alias to `listTools()`
 
 ### Debugging Circuit Breakers
 
@@ -248,8 +243,8 @@ Use public methods:
 
 ## Important Gotchas
 
-1. **Router model excluded from main providers**: The `router` key in `MODELS` uses GPT-5 Mini for routing decisions, not for user-facing responses
+1. **Router model excluded from main providers**: The `router` key in `MODELS` is excluded from legacy `all`; the `smart-auto` compatibility value routes directly to GPT-5 Mini
 2. **Circuit breaker state persistence**: Circuit breakers maintain state across requests within the same server instance
 3. **Cache key construction**: Cache keys include the resolved route, so the same task with different routing options uses different entries
-4. **Fallback hierarchy**: When circuit breaker opens, system uses intelligent fallback based on provider capabilities (google → claude → xai → moonshot → deepseek → openai)
+4. **OpenRouter circuit state**: Canonical and legacy `all` consultations share the live OpenRouter circuit breaker
 5. **Tool name matters**: Tool name affects system prompt via `buildToolSpecificPrompt()`, even though all tools share the same input schema

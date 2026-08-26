@@ -1,7 +1,7 @@
 # MCP Smart Usability and TUI Design
 
 Date: 2026-08-26
-Status: Draft for written review
+Status: Implemented in 2.0.0
 
 ## Objective
 
@@ -58,6 +58,8 @@ The interface will adapt to narrow terminals. Widths below 80 columns will repla
 | --- | --- |
 | `Tab` and `Shift+Tab` | Move focus. |
 | Arrow keys | Change a menu or preset. |
+| `Space` | Select or clear the focused Compare advisor. |
+| `a` | Show or hide full Compare answers. |
 | `Enter` | Submit or confirm the focused action. |
 | `Esc` | Return to the previous screen or cancel an idle form. |
 | `Ctrl+C` | Cancel an active request, then exit on a second press. |
@@ -90,9 +92,9 @@ Presets will map to these OpenRouter settings:
 | Fast | `openrouter/auto` | `low` |
 | Balanced | `openrouter/auto` | `medium` |
 | Best | `openrouter/auto` | `max` |
-| Custom | User-supplied model or Auto settings | User-supplied |
+| Custom | User-supplied direct model | Not applicable |
 
-Auto requests will use the `auto-router` plugin ID. The request builder will reject an incompatible plugin ID before sending the request. A direct OpenRouter model ID will bypass the Auto plugin.
+Auto requests use the `auto-router` plugin ID. Callers cannot override the plugin ID. A direct OpenRouter model ID bypasses the Auto plugin.
 
 Each TUI conversation will receive a session ID. Auto requests will reuse it so OpenRouter can keep a conversation on a stable model and provider when the task remains similar.
 
@@ -122,7 +124,7 @@ interface ConsultInput {
 }
 ```
 
-Only `task` will be required. The server will accept the seven current tool names as compatibility aliases but omit them from `tools/list`.
+`task` is required for every consultation. `preset: 'custom'` also requires `model`. The server accepts the seven current tool names as compatibility aliases but omits them from `tools/list`.
 
 ## Response Contract
 
@@ -132,9 +134,9 @@ Every successful consultation will return human-readable `content` and typed `st
 interface ConsultationResult {
   answer: string;
   receipt: {
-    requestId: string;
+    requestId?: string;
     requestedModel: string;
-    selectedModel: string;
+    selectedModel?: string;
     provider?: string;
     preset: string;
     costTier?: string;
@@ -146,7 +148,7 @@ interface ConsultationResult {
     latencyMs: number;
     cacheHit: boolean;
     cacheAgeMs?: number;
-    fallbackUsed: boolean;
+    fallbackUsed?: boolean;
   };
 }
 ```
@@ -183,7 +185,7 @@ interface SmartErrorDetails {
 
 The first release will distinguish missing key, authentication, insufficient credits, model restrictions, unavailable providers, timeout, local rate limit, provider rate limit, and circuit breaker failures.
 
-CLI and TUI commands will show the action without a stack trace. `DEBUG=1` will add stack traces and request diagnostics. Logs will redact prompts, context, authorization headers, and API keys.
+CLI and TUI commands show the action without a stack trace. `DEBUG=1` adds a CLI stack trace. Logs redact prompts, context, authorization headers, and API keys.
 
 Retries will stop after three attempts. The client will not retry authentication, credit, model restriction, or other non-transient failures.
 

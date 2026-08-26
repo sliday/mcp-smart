@@ -19,8 +19,8 @@ requires `OPENROUTER_API_KEY`.
 
 The `tui` branch uses a dynamic module path and imports the Ink entry point only
 after command selection. This keeps React and Ink out of normal stdio MCP,
-help, and version startup. Pure setup, doctor, and ask functions will be wired
-through the same dispatcher after their modules merge.
+help, and version startup. The setup, doctor, and ask modules are also imported
+only after the dispatcher selects their command.
 
 The supported runtime floor and development declarations are Node 22. React 19
 and Ink 7 are package dependencies because the published executable loads them

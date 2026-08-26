@@ -45,7 +45,7 @@ Compare starts with two direct advisors selected. Move through the visible model
 | `Esc` | Return to navigation |
 | `Ctrl+C` | Cancel an active request; press again to exit |
 | `?` | Show the key reference |
-| `q` | Exit from navigation |
+| `q` | Exit from navigation and read-only result or diagnostic screens |
 
 ## CLI commands
 
@@ -65,7 +65,7 @@ Pass a multiline task as one shell argument. Zsh ANSI-C quoting keeps line break
 mcp-smart ask $'Review this function:\n```ts\n  const value = 1;\n```'
 ```
 
-CLI failures include a stable code, message, and action. Set `DEBUG=1` to add a stack trace and request diagnostics. MCP Smart redacts prompts, context, authorization headers, and keys from logs.
+CLI failures include a stable code, message, and action. Set `DEBUG=1` to add a stack trace. MCP Smart redacts prompts, context, authorization headers, and keys from logs.
 
 ## MCP client setup
 
@@ -207,6 +207,8 @@ npm test -- --run
 Run the stdio server from source with `npm run dev`. Run the built CLI with `node dist/index.js --help`.
 
 See the [project wiki](wiki/_index.md), [architecture index](wiki/architecture/_index.md), and [runtime dispatch notes](wiki/architecture/runtime_dispatch.md) for the CLI-to-MCP boundary.
+
+See the [changelog](CHANGELOG.md) for release history. The [2.0 design](docs/superpowers/specs/2026-08-26-mcp-smart-usability-tui-design.md) and [implementation plan](docs/superpowers/plans/2026-08-26-mcp-smart-usability-tui.md) record the release contract and delivery steps.
 
 ## License and support
 
