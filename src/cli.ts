@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { SmartAdvisorServer } from './SmartAdvisorServer.js';
-import { runAsk } from './commands/ask.js';
-import { runDoctor } from './commands/doctor.js';
-import { runInit } from './commands/init.js';
+import type { runAsk } from './commands/ask.js';
+import type { runDoctor } from './commands/doctor.js';
+import type { runInit } from './commands/init.js';
 import type { SmartErrorDetails } from './contracts.js';
+import { sanitizeTerminalText } from './terminal.js';
 
 export type CliCommand =
   | { name: 'mcp' }
@@ -59,7 +59,17 @@ export interface CliDependencies {
   runAsk: typeof runAsk;
 }
 
-const defaultDependencies: CliDependencies = { runInit, runDoctor, runAsk };
+const defaultDependencies: CliDependencies = {
+  async runInit(options) {
+    return (await import('./commands/init.js')).runInit(options);
+  },
+  async runDoctor(options) {
+    return (await import('./commands/doctor.js')).runDoctor(options);
+  },
+  async runAsk(task, options) {
+    return (await import('./commands/ask.js')).runAsk(task, options);
+  },
+};
 
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -94,8 +104,8 @@ function writeError(error: unknown, json: boolean, debug: boolean): void {
     return;
   }
 
-  process.stderr.write(`${details.message}\nAction: ${details.action}\n`);
-  if (debug && error instanceof Error && error.stack) process.stderr.write(`${error.stack}\n`);
+  process.stderr.write(sanitizeTerminalText(`${details.message}\nAction: ${details.action}\n`));
+  if (debug && error instanceof Error && error.stack) process.stderr.write(`${sanitizeTerminalText(error.stack)}\n`);
 }
 
 function formatReceipt(receipt: object): string {
@@ -124,6 +134,7 @@ async function runCliCommand(
   }
 
   if (command.name === 'mcp') {
+    const { SmartAdvisorServer } = await import('./SmartAdvisorServer.js');
     const server = new SmartAdvisorServer();
     await server.run();
     return 0;
@@ -141,11 +152,11 @@ async function runCliCommand(
     if (command.json) {
       writeJson(result);
     } else {
-      process.stdout.write(
+      process.stdout.write(sanitizeTerminalText(
         `Environment:\n  ${result.environment.exportCommand}\n\n` +
         `MCP client:\n  ${JSON.stringify(result.client)}\n\n` +
         `Next: ${result.nextCommand}\n`
-      );
+      ));
     }
     return 0;
   }
@@ -159,16 +170,16 @@ async function runCliCommand(
         const detail = check.value ?? check.action;
         return `${name}: ${check.status}${detail ? ` - ${detail}` : ''}`;
       });
-      process.stdout.write(`${checks.join('\n')}\n`);
+      process.stdout.write(sanitizeTerminalText(`${checks.join('\n')}\n`));
     }
-    return 0;
+    return Object.values(result.checks).some(check => check.status === 'missing' || check.status === 'failed') ? 1 : 0;
   }
 
   const result = await dependencies.runAsk(command.task, { env });
   if (command.json) {
     writeJson(result);
   } else {
-    process.stdout.write(`${result.answer}\n\nReceipt: ${formatReceipt(result.receipt)}\n`);
+    process.stdout.write(sanitizeTerminalText(`${result.answer}\n\nReceipt: ${formatReceipt(result.receipt)}\n`));
   }
   return 0;
 }

@@ -55,13 +55,37 @@ class Logger {
 
 const MODELS = {
   'deepseek': 'deepseek/deepseek-v3.2-exp',
-  'google': 'google/gemini-3-pro-preview',
+  'google': 'google/gemini-3.1-pro-preview',
   'openai': 'openai/gpt-5-pro',
-  'xai': 'x-ai/grok-4',
+  'xai': 'x-ai/grok-4.6',
   'claude': 'anthropic/claude-sonnet-4.5',
   'moonshot': 'moonshotai/kimi-k2-thinking',
   'router': 'openai/gpt-5-mini' // For routing decisions
 } as const;
+
+const MAX_MODEL_ID_LENGTH = 256;
+const MAX_MODEL_FILTERS = 100;
+const MAX_REQUEST_TOKENS = 200_000;
+const MAX_SESSION_ID_LENGTH = 256;
+const CONSULTATION_INPUT_KEYS = new Set([
+  'task', 'context', 'intent', 'preset', 'model', 'costTier', 'allowedModels',
+  'excludedModels', 'maxTokens', 'sessionId', 'fresh',
+]);
+
+const LEGACY_MODEL_ROUTES: Record<string, string> = {
+  auto: 'openrouter/auto',
+  intelligence: MODELS.claude,
+  premium: MODELS.openai,
+  cost: MODELS.deepseek,
+  balance: MODELS.google,
+  speed: MODELS.xai,
+  deepseek: MODELS.deepseek,
+  google: MODELS.google,
+  openai: MODELS.openai,
+  xai: MODELS.xai,
+  claude: MODELS.claude,
+  moonshot: MODELS.moonshot,
+};
 
 const MODEL_NAMES = {
   'deepseek': 'DeepSeek v3.2',
@@ -250,7 +274,7 @@ Verification: [Explanation of how the solution meets the requirements]
 Potential Improvements: [Brief discussion of optimizations or alternatives] 
 ~~~~~~`;
 
-function buildToolSpecificPrompt(toolName: string): string {
+export function buildToolSpecificPrompt(toolName: string): string {
   const toolRole = TOOL_SPECIFIC_ROLES[toolName as keyof typeof TOOL_SPECIFIC_ROLES];
   
   if (!toolRole) {
@@ -372,7 +396,6 @@ interface CircuitBreakerMetrics {
 interface CircuitBreakerConfig {
   failureThreshold: number;
   recoveryTimeout: number;
-  monitoringPeriod: number;
   halfOpenMaxCalls: number;
 }
 
@@ -440,6 +463,7 @@ class CircuitBreaker {
     shouldCountFailure: (error: unknown) => boolean = () => true,
   ): Promise<T> {
     this.metrics.totalRequests++;
+    let halfOpenTrial = false;
 
     if (this.metrics.state === CircuitBreakerState.OPEN) {
       if (this.shouldAttemptReset()) {
@@ -462,6 +486,7 @@ class CircuitBreaker {
         );
       }
       this.halfOpenCalls++;
+      halfOpenTrial = true;
     }
 
     try {
@@ -469,7 +494,11 @@ class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      if (shouldCountFailure(error)) this.onFailure();
+      if (shouldCountFailure(error)) {
+        this.onFailure();
+      } else if (halfOpenTrial && this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+        this.halfOpenCalls = Math.max(0, this.halfOpenCalls - 1);
+      }
       throw error;
     }
   }
@@ -530,27 +559,36 @@ function isTransientProviderFailure(error: unknown): boolean {
 function matchesConsultationSchema(raw: Record<string, unknown>): boolean {
   const presets = new Set(['fast', 'balanced', 'best', 'custom']);
   const costTiers = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-  const stringArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
-  return (raw.preset === undefined || typeof raw.preset === 'string' && presets.has(raw.preset))
-    && (raw.model === undefined || typeof raw.model === 'string')
+  const intents = new Set(['advice', 'code-review', 'expert-opinion']);
+  const boundedString = (value: unknown, maxLength: number) =>
+    typeof value === 'string' && value.length >= 1 && value.length <= maxLength;
+  const stringArray = (value: unknown) => Array.isArray(value)
+    && value.length <= MAX_MODEL_FILTERS
+    && value.every(item => boundedString(item, MAX_MODEL_ID_LENGTH));
+  if (Object.keys(raw).some(key => !CONSULTATION_INPUT_KEYS.has(key))) return false;
+  if (raw.preset === 'custom' && !boundedString(raw.model, MAX_MODEL_ID_LENGTH)) return false;
+  return (raw.intent === undefined || typeof raw.intent === 'string' && intents.has(raw.intent))
+    && (raw.preset === undefined || typeof raw.preset === 'string' && presets.has(raw.preset))
+    && (raw.model === undefined || boundedString(raw.model, MAX_MODEL_ID_LENGTH))
     && (raw.costTier === undefined || typeof raw.costTier === 'string' && costTiers.has(raw.costTier))
     && (raw.allowedModels === undefined || stringArray(raw.allowedModels))
     && (raw.excludedModels === undefined || stringArray(raw.excludedModels))
-    && (raw.maxTokens === undefined || typeof raw.maxTokens === 'number' && Number.isInteger(raw.maxTokens) && raw.maxTokens >= 1)
-    && (raw.sessionId === undefined || typeof raw.sessionId === 'string')
+    && (raw.maxTokens === undefined || typeof raw.maxTokens === 'number' && Number.isInteger(raw.maxTokens) && raw.maxTokens >= 1 && raw.maxTokens <= MAX_REQUEST_TOKENS)
+    && (raw.sessionId === undefined || boundedString(raw.sessionId, MAX_SESSION_ID_LENGTH))
     && (raw.fresh === undefined || typeof raw.fresh === 'boolean');
 }
 
 export class SmartAdvisorServer {
   private server: Server;
   private config: Config;
-  private requestCache = new Map<string, { response: string; timestamp: number; accessCount: number }>();
+  private requestCache = new Map<string, { response: string; timestamp: number; lastAccessedAt: number; accessCount: number }>();
   private cacheMetrics: CacheMetrics = { hits: 0, misses: 0, evictions: 0, totalRequests: 0, hitRate: 0 };
+  private cacheAccessSequence = 0;
   private logger = new Logger('SmartAdvisorServer');
   private rateLimitTracker = new Map<string, { count: number; windowStart: number }>();
   private startTime = Date.now();
   private circuitBreakers = new Map<string, CircuitBreaker>();
-  private consultationCache = new Map<string, { result: ConsultationResult; timestamp: number }>();
+  private consultationCache = new Map<string, { result: ConsultationResult; timestamp: number; lastAccessedAt: number }>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -601,22 +639,32 @@ export class SmartAdvisorServer {
 
     return {
       openrouterApiKey: apiKey,
-      maxRetries: parseInt(process.env.MAX_RETRIES || '3', 10),
-      requestTimeout: parseInt(process.env.REQUEST_TIMEOUT || '30000', 10),
-      cacheTtl: parseInt(process.env.CACHE_TTL || '300000', 10), // 5 minutes
-      maxTokens: parseInt(process.env.MAX_TOKENS || '4000', 10),
-      maxCacheSize: parseInt(process.env.MAX_CACHE_SIZE || '100', 10),
-      maxTaskLength: parseInt(process.env.MAX_TASK_LENGTH || '10000', 10),
-      maxContextLength: parseInt(process.env.MAX_CONTEXT_LENGTH || '20000', 10),
-      rateLimitRequests: parseInt(process.env.RATE_LIMIT_REQUESTS || '10', 10),
-      rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW || '60000', 10), // 1 minute
+      maxRetries: this.environmentInteger('MAX_RETRIES', 3, 1, 3),
+      requestTimeout: this.environmentInteger('REQUEST_TIMEOUT', 30000, 1),
+      cacheTtl: this.environmentInteger('CACHE_TTL', 300000, 0),
+      maxTokens: this.environmentInteger('MAX_TOKENS', 4000, 1, MAX_REQUEST_TOKENS),
+      maxCacheSize: this.environmentInteger('MAX_CACHE_SIZE', 100, 1),
+      maxTaskLength: this.environmentInteger('MAX_TASK_LENGTH', 10000, 1),
+      maxContextLength: this.environmentInteger('MAX_CONTEXT_LENGTH', 20000, 1),
+      rateLimitRequests: this.environmentInteger('RATE_LIMIT_REQUESTS', 10, 0),
+      rateLimitWindow: this.environmentInteger('RATE_LIMIT_WINDOW', 60000, 1),
       circuitBreaker: {
-        failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10),
-        recoveryTimeout: parseInt(process.env.CIRCUIT_BREAKER_RECOVERY_TIMEOUT || '60000', 10), // 1 minute
-        monitoringPeriod: parseInt(process.env.CIRCUIT_BREAKER_MONITORING_PERIOD || '300000', 10), // 5 minutes
-        halfOpenMaxCalls: parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS || '3', 10)
+        failureThreshold: this.environmentInteger('CIRCUIT_BREAKER_FAILURE_THRESHOLD', 5, 1),
+        recoveryTimeout: this.environmentInteger('CIRCUIT_BREAKER_RECOVERY_TIMEOUT', 60000, 0),
+        halfOpenMaxCalls: this.environmentInteger('CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS', 3, 1)
       }
     };
+  }
+
+  private environmentInteger(name: string, fallback: number, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+      this.logger.warn('Invalid numeric environment value; using default', {name, fallback});
+      return fallback;
+    }
+    return value;
   }
 
   private validateInput(task: string, context: string): ValidationResult {
@@ -752,25 +800,51 @@ export class SmartAdvisorServer {
     const inputSchema = {
       type: 'object',
       properties: {
-        task: {type: 'string', description: 'The task or problem to consult on'},
-        context: {type: 'string', description: 'Optional supporting context'},
+        task: {type: 'string', minLength: 1, maxLength: this.config.maxTaskLength, description: 'The task or problem to consult on'},
+        context: {type: 'string', maxLength: this.config.maxContextLength, description: 'Optional supporting context'},
         intent: {type: 'string', enum: ['advice', 'code-review', 'expert-opinion']},
         preset: {type: 'string', enum: ['fast', 'balanced', 'best', 'custom']},
-        model: {type: 'string'},
+        model: {type: 'string', minLength: 1, maxLength: MAX_MODEL_ID_LENGTH},
         costTier: {type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max']},
-        allowedModels: {type: 'array', items: {type: 'string'}},
-        excludedModels: {type: 'array', items: {type: 'string'}},
-        maxTokens: {type: 'integer', minimum: 1},
-        sessionId: {type: 'string'},
+        allowedModels: {type: 'array', maxItems: MAX_MODEL_FILTERS, items: {type: 'string', minLength: 1, maxLength: MAX_MODEL_ID_LENGTH}},
+        excludedModels: {type: 'array', maxItems: MAX_MODEL_FILTERS, items: {type: 'string', minLength: 1, maxLength: MAX_MODEL_ID_LENGTH}},
+        maxTokens: {type: 'integer', minimum: 1, maximum: MAX_REQUEST_TOKENS},
+        sessionId: {type: 'string', minLength: 1, maxLength: MAX_SESSION_ID_LENGTH},
         fresh: {type: 'boolean'},
       },
       required: ['task'],
+      additionalProperties: false,
+      allOf: [{
+        if: {properties: {preset: {const: 'custom'}}, required: ['preset']},
+        then: {required: ['task', 'model']},
+      }],
     };
     const outputSchema = {
       type: 'object',
       properties: {
         answer: {type: 'string'},
-        receipt: {type: 'object', additionalProperties: true},
+        receipt: {
+          type: 'object',
+          properties: {
+            requestId: {type: 'string'},
+            requestedModel: {type: 'string'},
+            selectedModel: {type: 'string'},
+            provider: {type: 'string'},
+            preset: {type: 'string', enum: ['fast', 'balanced', 'best', 'custom']},
+            costTier: {type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max']},
+            taskType: {type: 'string'},
+            promptTokens: {type: 'integer', minimum: 0},
+            completionTokens: {type: 'integer', minimum: 0},
+            totalTokens: {type: 'integer', minimum: 0},
+            costUsd: {type: 'number', minimum: 0},
+            latencyMs: {type: 'number', minimum: 0},
+            cacheHit: {type: 'boolean'},
+            cacheAgeMs: {type: 'number', minimum: 0},
+            fallbackUsed: {type: 'boolean'},
+          },
+          required: ['requestedModel', 'preset', 'latencyMs', 'cacheHit'],
+          additionalProperties: false,
+        },
         error: {
           type: 'object',
           properties: {
@@ -820,7 +894,7 @@ export class SmartAdvisorServer {
 
     const raw = args ?? {};
     const task = raw.task;
-    const context = raw.context ?? '';
+    const context = raw.context === undefined ? '' : raw.context;
     if (typeof task !== 'string' || task.trim().length === 0 || typeof context !== 'string') {
       throw new SmartAdvisorError('A non-empty task and string context are required.', 'INVALID_INPUT');
     }
@@ -834,12 +908,27 @@ export class SmartAdvisorServer {
     if (!['advice', 'code-review', 'expert-opinion'].includes(intent)) {
       throw new SmartAdvisorError('Unknown consultation intent.', 'INVALID_INPUT');
     }
+    let model = raw.model;
+    if (name !== 'consult' && typeof model === 'string') {
+      if (model === 'all') {
+        return this.consultAllAdvisors(task, context, name, {
+          sessionId: raw.sessionId,
+          fresh: raw.fresh,
+        }, signal);
+      }
+      if (model === 'random') {
+        const routes = Object.values(LEGACY_MODEL_ROUTES).filter((value, index, values) => value !== 'openrouter/auto' && values.indexOf(value) === index);
+        model = routes[Math.floor(Math.random() * routes.length)];
+      } else {
+        model = LEGACY_MODEL_ROUTES[model] ?? model;
+      }
+    }
     const input: ConsultInput = {
       task,
       context: raw.context,
       intent,
       preset: raw.preset,
-      model: raw.model,
+      model,
       costTier: raw.costTier,
       allowedModels: raw.allowedModels,
       excludedModels: raw.excludedModels,
@@ -852,6 +941,7 @@ export class SmartAdvisorServer {
     const now = Date.now();
     const cached = this.consultationCache.get(cacheKey);
     if (!input.fresh && cached && now - cached.timestamp < this.config.cacheTtl) {
+      cached.lastAccessedAt = ++this.cacheAccessSequence;
       const result: ConsultationResult = {
         answer: cached.result.answer,
         receipt: {...cached.result.receipt, cacheHit: true, cacheAgeMs: now - cached.timestamp},
@@ -877,12 +967,9 @@ export class SmartAdvisorServer {
     const result = breaker
       ? await breaker.execute(() => client.consult(input), isTransientProviderFailure)
       : await client.consult(input);
-    this.consultationCache.set(cacheKey, {result, timestamp: Date.now()});
-    if (this.consultationCache.size > this.config.maxCacheSize) {
-      const oldest = this.consultationCache.keys().next().value;
-      if (oldest !== undefined) this.consultationCache.delete(oldest);
-      this.cacheMetrics.evictions++;
-    }
+    const cachedAt = Date.now();
+    this.consultationCache.set(cacheKey, {result, timestamp: cachedAt, lastAccessedAt: ++this.cacheAccessSequence});
+    this.enforceCacheCapacity();
     return this.consultationResult(result);
   }
 
@@ -917,10 +1004,21 @@ export class SmartAdvisorServer {
     };
   }
 
-  private async consultAllAdvisors(task: string, context: string, toolName: string = 'smart_advisor') {
-    const cacheKey = `all:${task}:${context}:${toolName}`;
-    const cached = this.getCachedResponse(cacheKey);
-    if (cached) {
+  private async consultAllAdvisors(
+    task: string,
+    context: string,
+    toolName: string = 'smart_advisor',
+    requestOptions: Pick<ConsultInput, 'sessionId' | 'fresh'> = {},
+    signal?: AbortSignal,
+  ) {
+    const cacheKey = JSON.stringify(['legacy-all-v2', toolName, requestOptions.sessionId ?? null, task, context]);
+    const cached = requestOptions.fresh ? null : this.getCachedResponse(cacheKey);
+    if (requestOptions.fresh) {
+      this.cacheMetrics.totalRequests++;
+      this.cacheMetrics.misses++;
+      this.updateCacheHitRate();
+    }
+    if (cached !== null) {
       return {
         content: [
           {
@@ -931,14 +1029,26 @@ export class SmartAdvisorServer {
       };
     }
 
-    const modelKeys = Object.keys(MODELS) as (keyof typeof MODELS)[];
+    const modelKeys = Object.keys(MODELS).filter(model => model !== 'router') as (keyof typeof MODELS)[];
+    const client = new OpenRouterClient({
+      apiKey: this.config.openrouterApiKey,
+      maxTokens: this.config.maxTokens,
+      timeoutMs: this.config.requestTimeout,
+      maxAttempts: this.config.maxRetries,
+      buildSystemPrompt: () => buildToolSpecificPrompt(toolName),
+      ...(signal ? {signal} : {}),
+    });
+    const circuitBreaker = this.circuitBreakers.get('openrouter');
     
     // Use Promise.allSettled for better error resilience
     const advisorPromises = modelKeys.map(async (modelKey) => {
       const startTime = Date.now();
       try {
         this.logger.debug('Starting advisor query', { model: modelKey, tool: toolName });
-        const response = await this.callOpenRouterWithRetry(MODELS[modelKey], task, context, toolName);
+        const consult = () => client.consult({task, context, model: MODELS[modelKey], preset: 'custom'});
+        const response = (await (circuitBreaker
+          ? circuitBreaker.execute(consult, isTransientProviderFailure)
+          : consult())).answer;
         const duration = Date.now() - startTime;
         
         this.logger.debug('Advisor query completed', { 
@@ -966,6 +1076,7 @@ export class SmartAdvisorServer {
         return {
           model: modelKey,
           error: errorMessage,
+          details: error instanceof OpenRouterError ? error.details : undefined,
           success: false,
           duration
         };
@@ -973,6 +1084,9 @@ export class SmartAdvisorServer {
     });
 
     const settledResults = await Promise.allSettled(advisorPromises);
+    if (signal?.aborted) {
+      throw new SmartAdvisorError('The OpenRouter request was cancelled.', 'REQUEST_CANCELLED');
+    }
     
     // Extract results from Promise.allSettled
     const results = settledResults.map((settledResult, index) => {
@@ -988,11 +1102,17 @@ export class SmartAdvisorServer {
         return {
           model: modelKey,
           error: 'Promise rejected unexpectedly',
+          details: undefined,
           success: false,
           duration: 0
         };
       }
     });
+    if (results.every(result => !result.success)) {
+      const details = results.find(result => !result.success && result.details !== undefined)?.details;
+      if (details !== undefined) throw new OpenRouterError(details);
+      throw new SmartAdvisorError('Every legacy advisor request failed.', 'NO_PROVIDER_AVAILABLE');
+    }
     const formattedResponse = this.formatMultiAdvisorResponse(results);
     
     this.setCachedResponse(cacheKey, formattedResponse);
@@ -1016,8 +1136,9 @@ export class SmartAdvisorServer {
       this.cacheMetrics.hits++;
       this.updateCacheHitRate();
       
-      // Update access count and timestamp for LRU
+      // Update access count and recency for LRU
       cached.accessCount++;
+      cached.lastAccessedAt = ++this.cacheAccessSequence;
       this.requestCache.set(key, cached);
       
       this.logger.debug('Cache hit', { 
@@ -1042,42 +1163,39 @@ export class SmartAdvisorServer {
   }
 
   private setCachedResponse(key: string, response: string): void {
-    // Implement LRU eviction if cache is full
-    if (this.requestCache.size >= this.config.maxCacheSize) {
-      this.evictLeastRecentlyUsed();
-    }
-
+    const cachedAt = Date.now();
     this.requestCache.set(key, {
       response,
-      timestamp: Date.now(),
+      timestamp: cachedAt,
+      lastAccessedAt: ++this.cacheAccessSequence,
       accessCount: 1,
     });
+    this.enforceCacheCapacity();
   }
 
-  private evictLeastRecentlyUsed(): void {
-    let lruKey: string | null = null;
-    let lruTimestamp = Date.now();
-    let lruAccessCount = Infinity;
-
-    // Find the least recently used entry
-    for (const [key, entry] of this.requestCache.entries()) {
-      if (entry.timestamp < lruTimestamp || 
-          (entry.timestamp === lruTimestamp && entry.accessCount < lruAccessCount)) {
-        lruKey = key;
-        lruTimestamp = entry.timestamp;
-        lruAccessCount = entry.accessCount;
+  private enforceCacheCapacity(): void {
+    while (this.requestCache.size + this.consultationCache.size > this.config.maxCacheSize) {
+      let lruKey: string | undefined;
+      let lruCache: 'request' | 'consultation' | undefined;
+      let lruTimestamp = Infinity;
+      for (const [key, entry] of this.requestCache.entries()) {
+        if (entry.lastAccessedAt < lruTimestamp) {
+          lruKey = key;
+          lruCache = 'request';
+          lruTimestamp = entry.lastAccessedAt;
+        }
       }
-    }
-
-    if (lruKey) {
+      for (const [key, entry] of this.consultationCache.entries()) {
+        if (entry.lastAccessedAt < lruTimestamp) {
+          lruKey = key;
+          lruCache = 'consultation';
+          lruTimestamp = entry.lastAccessedAt;
+        }
+      }
+      if (lruKey === undefined || lruCache === undefined) return;
+      if (lruCache === 'request') this.requestCache.delete(lruKey);
+      else this.consultationCache.delete(lruKey);
       this.cacheMetrics.evictions++;
-      this.logger.debug('Evicting LRU cache entry', { 
-        key: lruKey.substring(0, 50) + '...',
-        accessCount: lruAccessCount,
-        age: Date.now() - lruTimestamp,
-        totalEvictions: this.cacheMetrics.evictions
-      });
-      this.requestCache.delete(lruKey);
     }
   }
 
@@ -1197,12 +1315,11 @@ Consider:
     
     // Collect circuit breaker status
     const circuitBreakerStatus: Record<string, { state: CircuitBreakerState; failures: number; successRate: number }> = {};
-    let openCircuitBreakers = 0;
-    
     for (const [provider, cb] of this.circuitBreakers.entries()) {
       const metrics = cb.getMetrics();
-      const successRate = metrics.totalRequests > 0 
-        ? ((metrics.totalRequests - metrics.failures) / metrics.totalRequests) * 100 
+      const completedRequests = metrics.successes + metrics.failures;
+      const successRate = completedRequests > 0
+        ? (metrics.successes / completedRequests) * 100
         : 100;
       
       circuitBreakerStatus[provider] = {
@@ -1211,28 +1328,25 @@ Consider:
         successRate: Number(successRate.toFixed(2))
       };
       
-      if (metrics.state === CircuitBreakerState.OPEN) {
-        openCircuitBreakers++;
-      }
     }
     
     // Determine health status
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
     
-    // Mark as unhealthy if more than half of circuit breakers are open
-    if (openCircuitBreakers > this.circuitBreakers.size / 2) {
+    const openRouterState = this.circuitBreakers.get('openrouter')?.getState();
+    if (openRouterState === CircuitBreakerState.OPEN) {
       status = 'unhealthy';
-    } else if (openCircuitBreakers > 0) {
+    } else if (openRouterState === CircuitBreakerState.HALF_OPEN) {
       status = 'degraded';
     }
     
     // Mark as degraded if cache hit rate is very low (might indicate issues)
-    if (this.cacheMetrics.totalRequests > 10 && hitRate < 10) {
+    if (status === 'healthy' && this.cacheMetrics.totalRequests > 10 && hitRate < 10) {
       status = 'degraded';
     }
     
     // Mark as degraded if cache is at maximum capacity
-    if (cacheSize >= this.config.maxCacheSize) {
+    if (status === 'healthy' && cacheSize >= this.config.maxCacheSize) {
       status = 'degraded';
     }
 
@@ -1437,7 +1551,7 @@ Consider:
 
     let formatted = `# 🎯 Multi-Advisor Consultation Results
 
-**What you're seeing:** Three experienced AI advisors have independently analyzed your request. Consider their perspectives to find the most practical and efficient solution.
+**What you're seeing:** ${successfulResults.length} AI advisor${successfulResults.length === 1 ? ' has' : 's have'} independently analyzed your request. Consider their perspectives to find the most practical and efficient solution.
 
 `;
 

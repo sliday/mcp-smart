@@ -7,8 +7,8 @@ export interface TuiOptions extends Omit<AppProps, 'terminalWidth'> {
 }
 
 export async function runTui(options: TuiOptions = {}): Promise<void> {
-  const {render = inkRender, ...appOptions} = options;
-  const instance = render(<App {...appOptions}/>, {
+  const {render = inkRender, onForceExit = () => process.exit(130), ...appOptions} = options;
+  const instance = render(<App {...appOptions} onForceExit={onForceExit}/>, {
     alternateScreen: true,
     exitOnCtrlC: false,
   });

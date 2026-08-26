@@ -12,7 +12,11 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 interface OpenRouterResponse {
   id?: string;
   model?: string;
-  choices?: Array<{message?: {content?: string}}>;
+  choices?: Array<{
+    message?: {content?: string};
+    error?: OpenRouterResponseError;
+  }>;
+  error?: OpenRouterResponseError;
   openrouter_metadata?: {
     endpoints?: {
       available?: Array<{
@@ -31,6 +35,15 @@ interface OpenRouterResponse {
     completion_tokens?: number;
     total_tokens?: number;
     cost?: number;
+  };
+}
+
+interface OpenRouterResponseError {
+  code?: number;
+  message?: string;
+  metadata?: {
+    error_type?: string;
+    provider_code?: string | number;
   };
 }
 
@@ -96,7 +109,7 @@ export function normalizeOpenRouterError(error: unknown): SmartErrorDetails {
     details = {code: 'PROVIDER_RATE_LIMITED', message: 'OpenRouter rate limit exceeded.', action: 'Wait before retrying or reduce request frequency.'};
   } else if (status === 408 || record.code === 'ECONNABORTED' || record.code === 'ETIMEDOUT') {
     details = {code: 'REQUEST_TIMEOUT', message: 'The OpenRouter request timed out.', action: 'Retry the request or choose a faster preset.'};
-  } else if (status === 503) {
+  } else if ((status !== undefined && [500, 502, 503, 504].includes(status)) || ['ECONNRESET', 'ENETUNREACH', 'EAI_AGAIN', 'ECONNREFUSED'].includes(record.code)) {
     details = {code: 'NO_PROVIDER_AVAILABLE', message: 'No OpenRouter provider is currently available.', action: 'Retry later or choose a direct model.'};
   } else {
     details = {code: 'PROVIDER_UNAVAILABLE', message: 'The OpenRouter request failed.', action: 'Check provider availability and retry.'};
@@ -108,9 +121,22 @@ export function normalizeOpenRouterError(error: unknown): SmartErrorDetails {
 }
 
 function isTransient(error: unknown): boolean {
+  if (error instanceof OpenRouterError) {
+    return error.details.code === 'REQUEST_TIMEOUT' || error.details.code === 'NO_PROVIDER_AVAILABLE';
+  }
   const record = errorRecord(error);
   const status = errorRecord(record.response).status;
-  return status === 408 || status === 503 || record.code === 'ECONNABORTED' || record.code === 'ETIMEDOUT';
+  return [408, 500, 502, 503, 504].includes(status)
+    || ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENETUNREACH', 'EAI_AGAIN', 'ECONNREFUSED'].includes(record.code);
+}
+
+function responseErrorStatus(error: OpenRouterResponseError): number {
+  if (typeof error.code === 'number' && Number.isInteger(error.code)) return error.code;
+  const errorType = error.metadata?.error_type;
+  if (errorType === 'rate_limit_exceeded') return 429;
+  if (errorType === 'provider_timeout') return 408;
+  if (errorType === 'provider_unavailable' || errorType === 'no_instance_available') return 503;
+  return 502;
 }
 
 function optionalHeader(headers: unknown, name: string): string | undefined {
@@ -125,6 +151,18 @@ function optionalHeader(headers: unknown, name: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function optionalNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function optionalNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 export class OpenRouterClient {
   private readonly maxAttempts: number;
   private readonly delay: (ms: number) => Promise<void>;
@@ -135,6 +173,21 @@ export class OpenRouterClient {
       ? Math.max(1, Math.min(3, Math.trunc(configuredMaxAttempts)))
       : 3;
     this.delay = options.delay ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  }
+
+  private async waitBeforeRetry(milliseconds: number): Promise<void> {
+    const signal = this.options.signal;
+    if (signal === undefined) return this.delay(milliseconds);
+    if (signal.aborted) {
+      throw new OpenRouterError(normalizeOpenRouterError({code: 'ERR_CANCELED'}));
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => reject(new OpenRouterError(normalizeOpenRouterError({code: 'ERR_CANCELED'})));
+      signal.addEventListener('abort', onAbort, {once: true});
+      this.delay(milliseconds).then(resolve, reject).finally(() => {
+        signal.removeEventListener('abort', onAbort);
+      });
+    });
   }
 
   async consult(input: ConsultInput): Promise<ConsultationResult> {
@@ -154,7 +207,7 @@ export class OpenRouterClient {
       } catch (error) {
         lastError = error;
         if (!isTransient(error) || attempt === this.maxAttempts) break;
-        await this.delay(250 * 2 ** (attempt - 1));
+        await this.waitBeforeRetry(250 * 2 ** (attempt - 1));
       }
     }
     throw new OpenRouterError(normalizeOpenRouterError(lastError));
@@ -193,7 +246,22 @@ export class OpenRouterClient {
       timeout: this.options.timeoutMs ?? 30_000,
       signal: this.options.signal,
     });
-    const data = response.data;
+    const data = typeof response.data === 'object' && response.data !== null
+      ? response.data as OpenRouterResponse
+      : undefined;
+    if (data === undefined) {
+      throw new OpenRouterError({
+        code: 'INVALID_PROVIDER_RESPONSE',
+        message: 'OpenRouter returned an invalid response.',
+        action: 'Retry the request or choose another model.',
+      });
+    }
+    const responseError = data.error ?? data.choices?.find(choice => choice.error !== undefined)?.error;
+    if (responseError !== undefined) {
+      throw new OpenRouterError(normalizeOpenRouterError({
+        response: {status: responseErrorStatus(responseError), headers: response.headers},
+      }));
+    }
     const answer = data.choices?.[0]?.message?.content;
     if (typeof answer !== 'string' || answer.trim().length === 0) {
       throw new OpenRouterError({
@@ -209,22 +277,29 @@ export class OpenRouterClient {
       latencyMs: Date.now() - startedAt,
       cacheHit: false,
     };
-    const requestId = optionalHeader(response.headers, 'x-request-id') ?? data.id;
-    const provider = data.openrouter_metadata?.endpoints?.available
-      ?.find(endpoint => endpoint.selected === true && typeof endpoint.provider === 'string')
+    const requestId = optionalHeader(response.headers, 'x-request-id') ?? optionalString(data.id);
+    const availableEndpoints = data.openrouter_metadata?.endpoints?.available;
+    const provider = (Array.isArray(availableEndpoints) ? availableEndpoints : [])
+      .find(endpoint => typeof endpoint === 'object' && endpoint !== null && endpoint.selected === true && typeof endpoint.provider === 'string')
       ?.provider;
-    const taskType = data.openrouter_metadata?.pipeline
-      ?.map(stage => stage.data?.task_type)
+    const pipeline = data.openrouter_metadata?.pipeline;
+    const taskType = (Array.isArray(pipeline) ? pipeline : [])
+      .map(stage => typeof stage === 'object' && stage !== null ? stage.data?.task_type : undefined)
       .find(value => typeof value === 'string');
     if (requestId !== undefined) receipt.requestId = requestId;
-    if (data.model !== undefined) receipt.selectedModel = data.model;
+    const selectedModel = optionalString(data.model);
+    const promptTokens = optionalNonNegativeInteger(usage?.prompt_tokens);
+    const completionTokens = optionalNonNegativeInteger(usage?.completion_tokens);
+    const totalTokens = optionalNonNegativeInteger(usage?.total_tokens);
+    const costUsd = optionalNonNegativeNumber(usage?.cost);
+    if (selectedModel !== undefined) receipt.selectedModel = selectedModel;
     if (provider !== undefined) receipt.provider = provider;
     if (route.costTier !== undefined) receipt.costTier = route.costTier;
     if (taskType !== undefined) receipt.taskType = taskType;
-    if (usage?.prompt_tokens !== undefined) receipt.promptTokens = usage.prompt_tokens;
-    if (usage?.completion_tokens !== undefined) receipt.completionTokens = usage.completion_tokens;
-    if (usage?.total_tokens !== undefined) receipt.totalTokens = usage.total_tokens;
-    if (usage?.cost !== undefined) receipt.costUsd = usage.cost;
+    if (promptTokens !== undefined) receipt.promptTokens = promptTokens;
+    if (completionTokens !== undefined) receipt.completionTokens = completionTokens;
+    if (totalTokens !== undefined) receipt.totalTokens = totalTokens;
+    if (costUsd !== undefined) receipt.costUsd = costUsd;
 
     return {answer, receipt};
   }

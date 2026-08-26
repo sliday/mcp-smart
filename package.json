@@ -10,16 +10,18 @@
   "files": [
     "dist/",
     "README.md",
+    "smart.md",
     "package.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\"",
+    "build": "npm run clean && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
-    "prepublishOnly": "npm test -- --run && npm run build"
+    "prepack": "npm test -- --run && npm run build"
   },
   "keywords": [
     "mcp",
@@ -49,8 +51,8 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.6.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "axios": "^1.20.0",
     "ink": "^7.1.1",
     "react": "^19.2.8"
   },
