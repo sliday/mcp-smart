@@ -90,6 +90,25 @@ describe('OpenRouterClient', () => {
     expect(post.mock.calls[0][1]).not.toHaveProperty('plugins');
   });
 
+  it('sends smart-auto through the direct GPT-5 Mini compatibility route', async () => {
+    post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
+    const result = await new OpenRouterClient({apiKey: 'key'}).consult({
+      task: 'x',
+      model: 'smart-auto',
+      costTier: 'max',
+    });
+
+    expect(post.mock.calls[0][1]).toEqual(expect.objectContaining({
+      model: 'openai/gpt-5-mini',
+    }));
+    expect(post.mock.calls[0][1]).not.toHaveProperty('plugins');
+    expect(result.receipt).toMatchObject({
+      requestedModel: 'openai/gpt-5-mini',
+      preset: 'custom',
+    });
+    expect(result.receipt).not.toHaveProperty('costTier');
+  });
+
   it('forwards an optional cancellation signal to Axios', async () => {
     post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
     const controller = new AbortController();

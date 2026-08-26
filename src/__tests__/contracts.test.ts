@@ -32,6 +32,25 @@ describe('consultation contracts', () => {
     });
   });
 
+  it('resolves smart-auto to the direct GPT-5 Mini compatibility route', () => {
+    expect(resolveRoute({task: 'x', model: 'smart-auto'})).toEqual({
+      model: 'openai/gpt-5-mini',
+      preset: 'custom',
+    });
+  });
+
+  it('does not expose an unapplied Auto cost tier for direct models', () => {
+    expect(resolveRoute({
+      task: 'x',
+      model: 'openai/gpt-5',
+      preset: 'best',
+      costTier: 'max',
+    })).toEqual({
+      model: 'openai/gpt-5',
+      preset: 'custom',
+    });
+  });
+
   it('preserves Auto restrictions without sharing mutable arrays', () => {
     const allowedModels = ['openai/gpt-5', 'anthropic/claude-sonnet-4.5'];
     const excludedModels = ['google/gemini-flash'];

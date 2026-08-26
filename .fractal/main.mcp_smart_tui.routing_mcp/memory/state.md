@@ -136,3 +136,10 @@ transient provider-availability errors, cancellation is `REQUEST_CANCELLED`
 and non-retryable, and integration teardown exactly restores or deletes both
 `OPENROUTER_API_KEY` and `RATE_LIMIT_REQUESTS` according to their initial
 presence.
+
+Compatibility-route RED: contracts ran 10 tests with 2 failures (literal
+`smart-auto` and direct `costTier`/preset leakage); OpenRouter ran 15 tests with
+1 failure (literal wire model). GREEN: contracts 10/10, OpenRouter 15/15, and
+adjacent server suites 13/13. `smart-auto` now resolves to direct
+`openai/gpt-5-mini` with custom preset and no plugin, and all direct routes omit
+unapplied Auto cost tiers from resolved routes and receipts.

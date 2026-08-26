@@ -63,13 +63,15 @@ const PRESET_COST_TIERS: Partial<Record<ConsultationPreset, CostTier>> = {
 };
 
 export function resolveRoute(input: ConsultInput): ResolvedRoute {
-  const model = input.model ?? 'openrouter/auto';
-  const preset = input.preset ?? (model === 'openrouter/auto' ? 'balanced' : 'custom');
-  const costTier = input.costTier ?? PRESET_COST_TIERS[preset];
+  const requestedModel = input.model ?? 'openrouter/auto';
+  const model = requestedModel === 'smart-auto' ? 'openai/gpt-5-mini' : requestedModel;
+  const isAuto = model === 'openrouter/auto';
+  const preset = isAuto ? (input.preset ?? 'balanced') : 'custom';
+  const costTier = isAuto ? (input.costTier ?? PRESET_COST_TIERS[preset]) : undefined;
   const route: ResolvedRoute = {model, preset};
 
   if (costTier !== undefined) route.costTier = costTier;
-  if (model === 'openrouter/auto') {
+  if (isAuto) {
     route.pluginId = 'auto-router';
     if (input.allowedModels !== undefined) route.allowedModels = [...input.allowedModels];
     if (input.excludedModels !== undefined) route.excludedModels = [...input.excludedModels];
