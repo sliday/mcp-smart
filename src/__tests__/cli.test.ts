@@ -25,4 +25,83 @@ describe('CLI dispatch', () => {
 
     expect(write).toHaveBeenCalledWith('1.5.7\n');
   });
+
+  it('prints init as machine-readable JSON', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const result = {
+      environment: {
+        variable: 'OPENROUTER_API_KEY' as const,
+        exportCommand: 'export OPENROUTER_API_KEY="<your-openrouter-api-key>"',
+      },
+      client: {command: 'mcp-smart' as const, args: [] as []},
+      nextCommand: 'mcp-smart doctor',
+    };
+
+    await expect(runCli(['init', '--json'], {}, {
+      runInit: vi.fn().mockResolvedValue(result),
+    })).resolves.toBe(0);
+
+    expect(JSON.parse(String(write.mock.calls[0]?.[0]))).toEqual(result);
+  });
+
+  it('prints missing-key doctor JSON without a stack', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const result = {
+      checks: {
+        node: {status: 'ok' as const, value: '22.1.0'},
+        terminal: {status: 'warning' as const, action: 'Use an interactive terminal.'},
+        apiKey: {status: 'missing' as const, action: 'Set OPENROUTER_API_KEY.'},
+        openRouter: {status: 'skipped' as const, action: 'Set OPENROUTER_API_KEY.'},
+        defaultRoute: {status: 'ok' as const, value: 'openrouter/auto'},
+      },
+    };
+
+    await expect(runCli(['doctor', '--json'], {}, {
+      runDoctor: vi.fn().mockResolvedValue(result),
+    })).resolves.toBe(0);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(JSON.parse(output)).toEqual(result);
+    expect(output).not.toContain('stack');
+  });
+
+  it('prints the answer before a compact receipt and preserves the task', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const runAsk = vi.fn().mockResolvedValue({
+      answer: 'Keep the fence.',
+      receipt: {
+        requestedModel: 'openrouter/auto',
+        preset: 'balanced',
+        latencyMs: 12,
+        cacheHit: false,
+      },
+    });
+    const task = 'Review:\n```ts\n  const value = 1;\n```';
+
+    await expect(runCli(['ask', task], {}, {runAsk})).resolves.toBe(0);
+
+    expect(runAsk).toHaveBeenCalledWith(task, {env: {}});
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output.indexOf('Keep the fence.')).toBeLessThan(output.indexOf('Receipt:'));
+    expect(output).toContain('openrouter/auto');
+  });
+
+  it('prints ask as JSON when requested', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const result = {
+      answer: 'Use tests.',
+      receipt: {
+        requestedModel: 'openrouter/auto',
+        preset: 'balanced' as const,
+        latencyMs: 3,
+        cacheHit: false,
+      },
+    };
+
+    await expect(runCli(['ask', 'Review this', '--json'], {}, {
+      runAsk: vi.fn().mockResolvedValue(result),
+    })).resolves.toBe(0);
+
+    expect(JSON.parse(String(write.mock.calls[0]?.[0]))).toEqual(result);
+  });
 });

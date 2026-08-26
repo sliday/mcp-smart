@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { SmartAdvisorServer } from './SmartAdvisorServer.js';
+import { runAsk } from './commands/ask.js';
+import { runDoctor } from './commands/doctor.js';
+import { runInit } from './commands/init.js';
 
 export type CliCommand =
   | { name: 'mcp' }
@@ -49,8 +52,32 @@ function packageVersion(): string {
   return packageJson.version;
 }
 
-export async function runCli(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
+export interface CliDependencies {
+  runInit: typeof runInit;
+  runDoctor: typeof runDoctor;
+  runAsk: typeof runAsk;
+}
+
+const defaultDependencies: CliDependencies = { runInit, runDoctor, runAsk };
+
+function writeJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function formatReceipt(receipt: object): string {
+  return Object.entries(receipt)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' · ');
+}
+
+export async function runCli(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  injectedDependencies: Partial<CliDependencies> = {}
+): Promise<number> {
   const command = parseCommand(argv);
+  const dependencies = { ...defaultDependencies, ...injectedDependencies };
 
   if (command.name === 'help') {
     process.stdout.write(HELP);
@@ -75,6 +102,39 @@ export async function runCli(argv: string[], env: NodeJS.ProcessEnv): Promise<nu
     return 0;
   }
 
-  void env;
-  throw new Error(`${command.name} is not available in this build`);
+  if (command.name === 'init') {
+    const result = await dependencies.runInit({});
+    if (command.json) {
+      writeJson(result);
+    } else {
+      process.stdout.write(
+        `Environment:\n  ${result.environment.exportCommand}\n\n` +
+        `MCP client:\n  ${JSON.stringify(result.client)}\n\n` +
+        `Next: ${result.nextCommand}\n`
+      );
+    }
+    return 0;
+  }
+
+  if (command.name === 'doctor') {
+    const result = await dependencies.runDoctor({ env });
+    if (command.json) {
+      writeJson(result);
+    } else {
+      const checks = Object.entries(result.checks).map(([name, check]) => {
+        const detail = check.value ?? check.action;
+        return `${name}: ${check.status}${detail ? ` — ${detail}` : ''}`;
+      });
+      process.stdout.write(`${checks.join('\n')}\n`);
+    }
+    return 0;
+  }
+
+  const result = await dependencies.runAsk(command.task, { env });
+  if (command.json) {
+    writeJson(result);
+  } else {
+    process.stdout.write(`${result.answer}\n\nReceipt: ${formatReceipt(result.receipt)}\n`);
+  }
+  return 0;
 }
