@@ -63,3 +63,32 @@ The focused test mocks `axios.post` directly. Installed Axios 1.x declares
 `AxiosRequestConfig.signal?: GenericAbortSignal`. `OpenRouterClientOptions` now
 accepts an optional `AbortSignal` and forwards it to the Axios request without
 changing the public `consult(input)` signature or retry ceiling.
+
+## Active review corrections
+
+Parent review accepts the cancellation seam but requires five spec-critical
+corrections, in order, within the existing seven-file boundary:
+
+1. Keep permanent domain failures and cancellation from poisoning the circuit
+   breaker; restore both API-key and rate-limit environment variables in the
+   integration test.
+2. Resolve the compatibility model `smart-auto` to the direct
+   `openai/gpt-5-mini` route with no Auto plugin.
+3. Preserve stable domain error code/action across the real MCP transport using
+   safe `isError` content and structured details, after checking installed SDK
+   declarations and capturing an in-memory transport RED.
+4. Reject successful HTTP responses that lack a text completion with a stable
+   provider-response error.
+5. Parse only observed official `openrouter_metadata` values: selected provider
+   at `endpoints.available[].selected` and Auto task type at
+   `pipeline[].data.task_type`.
+
+The actionable parent message is saved as radio UUID `5EC66F74`. Legacy cleanup,
+broad optional-input validation, and MCP AbortSignal threading are explicitly
+out of scope for this correction pass.
+
+The executable correction sequence is recorded in plan 5.1. No correction test
+or production edit has started: reserve mode activated immediately before
+EXECUTE. Resume with boundary 1 preflight, focused circuit-breaker RED, and the
+integration environment restoration; retain the saved directive until all five
+boundaries are green.
