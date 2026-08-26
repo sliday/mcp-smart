@@ -1,7 +1,12 @@
+import axios from 'axios';
 import {describe, expect, it, vi} from 'vitest';
 import {runAsk} from '../commands/ask.js';
 import {runDoctor} from '../commands/doctor.js';
 import {runInit} from '../commands/init.js';
+
+vi.mock('axios');
+
+const post = vi.mocked(axios.post);
 
 describe('command workflows', () => {
   it('returns copyable setup guidance without accepting a key', async () => {
@@ -120,5 +125,57 @@ describe('command workflows', () => {
       context: 'Keep the code fence.',
       model: 'openrouter/auto',
     });
+  });
+
+  it('applies documented OpenRouter settings and a non-empty system prompt', async () => {
+    post.mockResolvedValueOnce({
+      data: {choices: [{message: {content: 'Configured answer'}}]},
+      headers: {},
+    } as never);
+
+    await expect(runAsk('Review this', {
+      intent: 'code-review',
+      env: {
+        OPENROUTER_API_KEY: 'test-key',
+        MAX_TOKENS: '123',
+        REQUEST_TIMEOUT: '456',
+      },
+    })).resolves.toMatchObject({answer: 'Configured answer'});
+
+    const [, body, config] = post.mock.calls[0];
+    expect(body).toMatchObject({
+      max_tokens: 123,
+      messages: [
+        {role: 'system', content: expect.stringMatching(/Code Reviewer/)},
+        {role: 'user', content: 'Task: Review this'},
+      ],
+    });
+    expect(config).toMatchObject({timeout: 456});
+  });
+
+  it('honors MAX_RETRIES as the total OpenRouter attempt limit', async () => {
+    post.mockReset();
+    post.mockRejectedValue({response: {status: 503, headers: {}}});
+
+    await expect(runAsk('Review this', {
+      env: {OPENROUTER_API_KEY: 'test-key', MAX_RETRIES: '1'},
+    })).rejects.toMatchObject({details: {code: 'NO_PROVIDER_AVAILABLE'}});
+
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it('rejects tasks and context beyond the documented environment limits', async () => {
+    const consult = vi.fn();
+
+    await expect(runAsk('four', {
+      client: {consult},
+      env: {MAX_TASK_LENGTH: '3'},
+    })).rejects.toMatchObject({details: {code: 'INVALID_INPUT'}});
+    await expect(runAsk('ok', {
+      client: {consult},
+      context: 'four',
+      env: {MAX_CONTEXT_LENGTH: '3'},
+    })).rejects.toMatchObject({details: {code: 'INVALID_INPUT'}});
+    expect(consult).not.toHaveBeenCalled();
   });
 });

@@ -83,6 +83,15 @@ describe('OpenRouterClient', () => {
     });
   });
 
+  it('lets request maxTokens override the client default', async () => {
+    post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
+    const client = new OpenRouterClient({apiKey: 'key', maxTokens: 777});
+
+    await client.consult({task: 'x', maxTokens: 123});
+
+    expect(post.mock.calls[0][1]).toEqual(expect.objectContaining({max_tokens: 123}));
+  });
+
   it('omits the plugin for direct models', async () => {
     post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
     const client = new OpenRouterClient({apiKey: 'key'});
@@ -143,6 +152,22 @@ describe('OpenRouterClient', () => {
     }
   });
 
+  it('cancels during retry backoff without starting another provider request', async () => {
+    post.mockRejectedValue({response: {status: 503, headers: {}}});
+    const controller = new AbortController();
+    let releaseDelay: (() => void) | undefined;
+    const delay = vi.fn(() => new Promise<void>(resolve => { releaseDelay = resolve; }));
+    const client = new OpenRouterClient({apiKey: 'key', signal: controller.signal, delay});
+
+    const pending = client.consult({task: 'x'});
+    await vi.waitFor(() => expect(delay).toHaveBeenCalledTimes(1));
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({details: {code: 'REQUEST_CANCELLED'}});
+    expect(post).toHaveBeenCalledTimes(1);
+    releaseDelay?.();
+  });
+
   it('does not invent absent response metadata', async () => {
     post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
     const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
@@ -150,6 +175,74 @@ describe('OpenRouterClient', () => {
       'completionTokens', 'totalTokens', 'costUsd', 'fallbackUsed']) {
       expect(result.receipt).not.toHaveProperty(key);
     }
+  });
+
+  it('omits malformed optional receipt metadata', async () => {
+    post.mockResolvedValue(response({
+      id: {value: 'gen-1'},
+      model: {value: 'openai/gpt-5'},
+      choices: [{message: {content: 'ok'}}],
+      usage: {
+        prompt_tokens: 1.5,
+        completion_tokens: -1,
+        total_tokens: Number.NaN,
+        cost: Number.POSITIVE_INFINITY,
+      },
+      openrouter_metadata: {
+        endpoints: {available: {provider: 'invalid-container'}},
+        pipeline: {data: {task_type: 'invalid-container'}},
+      },
+    }) as never);
+
+    const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
+
+    expect(result.receipt).toMatchObject({
+      requestedModel: 'openrouter/auto',
+      preset: 'balanced',
+      latencyMs: expect.any(Number),
+      cacheHit: false,
+    });
+    for (const key of ['requestId', 'selectedModel', 'provider', 'taskType', 'promptTokens',
+      'completionTokens', 'totalTokens', 'costUsd']) {
+      expect(result.receipt).not.toHaveProperty(key);
+    }
+  });
+
+  it('omits null optional metadata entries without discarding a valid answer', async () => {
+    post.mockResolvedValue(response({
+      choices: [{message: {content: 'paid answer'}}],
+      openrouter_metadata: {
+        endpoints: {available: [null, {provider: 'Provider B', selected: true}]},
+        pipeline: [null, {data: {task_type: 'coding'}}],
+      },
+    }) as never);
+
+    const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
+
+    expect(result).toMatchObject({
+      answer: 'paid answer',
+      receipt: {provider: 'Provider B', taskType: 'coding'},
+    });
+  });
+
+  it('preserves valid body identifiers and zero-valued usage metadata', async () => {
+    post.mockResolvedValue(response({
+      id: 'gen-zero',
+      model: 'openai/gpt-5',
+      choices: [{message: {content: 'ok'}}],
+      usage: {prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0},
+    }) as never);
+
+    const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});
+
+    expect(result.receipt).toMatchObject({
+      requestId: 'gen-zero',
+      selectedModel: 'openai/gpt-5',
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      costUsd: 0,
+    });
   });
 
   it('normalizes only observed nested OpenRouter provider and task metadata', async () => {
@@ -200,6 +293,44 @@ describe('OpenRouterClient', () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
+  it.each([null, 'scalar', 42])('rejects a malformed successful response envelope: %j', async data => {
+    post.mockResolvedValue({data, headers: {}} as never);
+    const client = new OpenRouterClient({apiKey: 'key'});
+
+    await expect(client.consult({task: 'x'})).rejects.toMatchObject({
+      details: {code: 'INVALID_PROVIDER_RESPONSE'},
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects and retries an HTTP 200 provider error instead of accepting partial content', async () => {
+    post.mockResolvedValue(response({
+      choices: [{message: {content: 'partial answer'}}],
+      error: {metadata: {error_type: 'provider_unavailable'}},
+    }) as never);
+    const client = new OpenRouterClient({apiKey: 'key', delay: async () => undefined});
+
+    await expect(client.consult({task: 'x'})).rejects.toMatchObject({
+      details: {code: 'NO_PROVIDER_AVAILABLE'},
+    });
+    expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops after one HTTP 200 rate-limit error nested in a partial choice', async () => {
+    post.mockResolvedValue(response({
+      choices: [{
+        message: {content: 'partial answer'},
+        error: {code: 429, metadata: {error_type: 'rate_limit_exceeded'}},
+      }],
+    }) as never);
+    const client = new OpenRouterClient({apiKey: 'key', delay: async () => undefined});
+
+    await expect(client.consult({task: 'x'})).rejects.toMatchObject({
+      details: {code: 'PROVIDER_RATE_LIMITED'},
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [401, 'AUTHENTICATION_FAILED'],
     [402, 'INSUFFICIENT_CREDITS'],
@@ -216,7 +347,11 @@ describe('OpenRouterClient', () => {
   it.each([
     [{code: 'ECONNABORTED'}, 'REQUEST_TIMEOUT'],
     [{response: {status: 408, headers: {}}}, 'REQUEST_TIMEOUT'],
+    [{code: 'ECONNRESET'}, 'NO_PROVIDER_AVAILABLE'],
+    [{response: {status: 500, headers: {}}}, 'NO_PROVIDER_AVAILABLE'],
+    [{response: {status: 502, headers: {}}}, 'NO_PROVIDER_AVAILABLE'],
     [{response: {status: 503, headers: {}}}, 'NO_PROVIDER_AVAILABLE'],
+    [{response: {status: 504, headers: {}}}, 'NO_PROVIDER_AVAILABLE'],
   ])('makes at most three total attempts for a transient failure', async (error, code) => {
     post.mockRejectedValue(error);
     const client = new OpenRouterClient({apiKey: 'key', delay: async () => undefined});

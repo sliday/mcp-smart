@@ -59,11 +59,28 @@ describe('CLI dispatch', () => {
 
     await expect(runCli(['doctor', '--json'], {}, {
       runDoctor: vi.fn().mockResolvedValue(result),
-    })).resolves.toBe(0);
+    })).resolves.toBe(1);
 
     const output = String(write.mock.calls[0]?.[0]);
     expect(JSON.parse(output)).toEqual(result);
     expect(output).not.toContain('stack');
+  });
+
+  it('returns zero when Doctor has warnings but all required checks pass', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const result = {
+      checks: {
+        node: {status: 'ok' as const, value: '22.1.0'},
+        terminal: {status: 'warning' as const, action: 'Use an interactive terminal.'},
+        apiKey: {status: 'ok' as const},
+        openRouter: {status: 'ok' as const},
+        defaultRoute: {status: 'ok' as const, value: 'openrouter/auto'},
+      },
+    };
+
+    await expect(runCli(['doctor'], {}, {
+      runDoctor: vi.fn().mockResolvedValue(result),
+    })).resolves.toBe(0);
   });
 
   it('prints the answer before a compact receipt and preserves the task', async () => {
@@ -87,10 +104,29 @@ describe('CLI dispatch', () => {
     expect(output).toContain('openrouter/auto');
   });
 
+  it('strips CSI and OSC sequences from text output while preserving readable layout', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const runAsk = vi.fn().mockResolvedValue({
+      answer: 'Heading\n\t\u001b[31mWarning\u001b[0m\n\u001b]0;Owned title\u0007\u001b]8;;https://evil.invalid\u001b\\Read this\u001b]8;;\u001b\\',
+      receipt: {
+        requestedModel: 'openrouter/auto',
+        preset: 'balanced',
+        latencyMs: 12,
+        cacheHit: false,
+      },
+    });
+
+    await expect(runCli(['ask', 'Review this'], {}, {runAsk})).resolves.toBe(0);
+
+    expect(String(write.mock.calls[0]?.[0])).toBe(
+      'Heading\n\tWarning\nRead this\n\nReceipt: requestedModel=openrouter/auto · preset=balanced · latencyMs=12 · cacheHit=false\n'
+    );
+  });
+
   it('prints ask as JSON when requested', async () => {
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const result = {
-      answer: 'Use tests.',
+      answer: '\u001b[31mUse tests.\u001b[0m\u001b]0;Owned title\u0007',
       receipt: {
         requestedModel: 'openrouter/auto',
         preset: 'balanced' as const,
@@ -121,6 +157,21 @@ describe('CLI dispatch', () => {
     const output = String(write.mock.calls[0]?.[0]);
     expect(output).toBe('A consultation task is required.\nAction: Provide a task and try again.\n');
     expect(output).not.toContain('CommandError');
+  });
+
+  it('strips terminal controls from human-readable errors', async () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new CommandError({
+      code: 'PROVIDER_UNAVAILABLE',
+      message: '\u001b]0;Owned title\u0007Provider \u001b[8mhidden\u001b[0m failed.',
+      action: '\u001b[31mRetry safely.\u001b[0m',
+    });
+
+    await expect(runCli(['ask', 'Review'], {}, {
+      runAsk: vi.fn().mockRejectedValue(error),
+    })).resolves.toBe(1);
+
+    expect(String(write.mock.calls[0]?.[0])).toBe('Provider hidden failed.\nAction: Retry safely.\n');
   });
 
   it('prints stable errors as one JSON document', async () => {
