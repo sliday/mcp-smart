@@ -25,6 +25,15 @@ request for a blank key. Its test suite mocks Axios.
 they are unavailable; parent-owned wiring is required to consume the delivered
 pure modules.
 
+Correction preflight: `src/commands/doctor.ts` defines the private default
+`defaultProbe(apiKey: string): Promise<void>`, which initially called native
+`fetch` with `GET https://openrouter.ai/api/v1/models` plus an `Authorization:
+Bearer <key>` header. `DoctorOptions.probeOpenRouter` is injectable, but there
+is no fetch injection seam, so the focused regression test must mock global
+`fetch`. The API's authenticated current-key validation endpoint is instead
+`https://openrouter.ai/api/v1/key`; a non-OK response is intentionally mapped
+by `runDoctor` to the typed, key-free failed check.
+
 ## TDD evidence
 
 The focused command test command is `npm test -- --run
@@ -46,5 +55,16 @@ src/__tests__/commands.test.ts`.
   structured configuration. The doctor test also verified Node, terminal,
   OpenRouter probe, and default route checks without serializing its supplied
   API-key sentinel.
+- Authenticated doctor probe RED: `npm test -- --run
+  src/__tests__/commands.test.ts` ran 6 tests with 1 failure. The mocked fetch
+  received `https://openrouter.ai/api/v1/models` while the regression expected
+  `https://openrouter.ai/api/v1/key`; the bearer header itself matched. The
+  mocked 401 path already mapped to the existing actionable failed result.
+- Authenticated doctor probe GREEN: after changing only the default URL to
+  `/api/v1/key`, `npm test -- --run src/__tests__/commands.test.ts` passed all
+  6 tests. `npm run build` passed, and the inherited
+  `.fractal/main.mcp_smart_tui.cli_commands/scripts/test.sh` passed its 68-test
+  suite and build. The mocked 401 test proves the bearer header is sent and the
+  sentinel key is absent from serialized result data.
 
 `npm run build` completed successfully after the focused suite.

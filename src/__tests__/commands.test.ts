@@ -63,10 +63,31 @@ describe('command workflows', () => {
     });
 
     expect(result.checks.openRouter).toEqual({status: 'ok'});
-    expect(fetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/auth/key', {
+    expect(fetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', {
       headers: {Authorization: 'Bearer not-for-output'},
     });
     expect(JSON.stringify(result)).not.toContain('not-for-output');
+  });
+
+  it('validates the current key endpoint and reports an unauthorized key safely', async () => {
+    const sentinelKey = 'sentinel-openrouter-key';
+    const mockedFetch = vi.fn().mockResolvedValue({ok: false, status: 401});
+    vi.stubGlobal('fetch', mockedFetch);
+
+    try {
+      const result = await runDoctor({env: {OPENROUTER_API_KEY: sentinelKey}});
+
+      expect(mockedFetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', {
+        headers: {Authorization: `Bearer ${sentinelKey}`},
+      });
+      expect(result.checks.openRouter).toEqual({
+        status: 'failed',
+        action: 'Check OPENROUTER_API_KEY and network access, then run doctor again.',
+      });
+      expect(JSON.stringify(result)).not.toContain(sentinelKey);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('rejects an empty task with an actionable stable error', async () => {
