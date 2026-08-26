@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import React, {useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {runAsk} from '../commands/ask.js';
@@ -66,6 +67,7 @@ export function App({terminalWidth = process.stdout.columns ?? 80, dependencies 
   const [focus, setFocus] = useState(0);
   const [task, setTask] = useState(initialTask);
   const [context, setContext] = useState('');
+  const [sessionId] = useState(() => randomUUID());
   const [customModel, setCustomModel] = useState('');
   const [presetIndex, setPresetIndex] = useState(1);
   const [stage, setStage] = useState<Stage>('Idle');
@@ -89,8 +91,9 @@ export function App({terminalWidth = process.stdout.columns ?? 80, dependencies 
     task,
     ...(context ? {context} : {}),
     preset: presets[presetIndex],
+    sessionId,
     ...(custom ? {model: customModel.trim()} : {}),
-  }), [context, custom, customModel, presetIndex, task]);
+  }), [context, custom, customModel, presetIndex, sessionId, task]);
 
   const clearOutcome = () => {
     setAnswer(undefined); setError(undefined); setCompare([]); setStage('Idle'); setCancelledOnce(false);
@@ -166,6 +169,8 @@ export function App({terminalWidth = process.stdout.columns ?? 80, dependencies 
         request.current.abort();
         setCancelledOnce(true);
         setStage('Cancelled');
+      } else {
+        exit();
       }
       return;
     }
@@ -209,8 +214,8 @@ export function App({terminalWidth = process.stdout.columns ?? 80, dependencies 
       <Text>Compare two advisors · routing route excluded: openrouter/auto</Text>
       <TextArea label="Task" value={task} active={focus === 1} onChange={setTask} onSubmit={() => setFocus(2)}/>
       <Text color={focus === 2 ? theme.accent : undefined}>{focus === 2 ? '› ' : '  '}Compare advisors</Text>
+      {compare.length > 0 ? <Text>Compare results</Text> : null}
       {compare.map(outcome => <Box key={outcome.model} flexDirection="column"><Text>{outcome.model}: {outcome.result ? `Success: ${outcome.result.answer}` : `Failed: ${outcome.error?.message}`}</Text>{outcome.result?.receipt.costUsd !== undefined ? <Text>costUsd: {outcome.result.receipt.costUsd}</Text> : null}{outcome.error ? <Text color={theme.error}>{outcome.error.action}</Text> : null}</Box>)}
-      {compare.length > 0 ? <><Text>Agreements: successful advice is retained.</Text><Text>Conflicts: advisor outcomes are labelled.</Text><Text>Recommendation: use the successful answer and retry failed advisors.</Text></> : null}
     </Box>;
     if (route === 'Doctor') return <Box flexDirection="column"><Text>Environment checks</Text>{doctor ? Object.entries(doctor.checks).map(([name, check]) => <Text key={name}>{name}: {check.status}{check.value ? `: ${check.value}` : check.action ? `: ${check.action}` : ''}</Text>) : <Text>Request stage: Routing request</Text>}</Box>;
     if (route === 'Setup') return <Box flexDirection="column"><Text>Setup</Text>{setup ? <><Text>{setup.environment.variable}</Text><Text>{setup.environment.exportCommand}</Text><Text>Next: {setup.nextCommand}</Text></> : <Text>Request stage: Routing request</Text>}</Box>;

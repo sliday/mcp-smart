@@ -24,7 +24,7 @@ describe('CLI dispatch', () => {
 
     await expect(runCli(['--version'], {})).resolves.toBe(0);
 
-    expect(write).toHaveBeenCalledWith('1.5.7\n');
+    expect(write).toHaveBeenCalledWith('2.0.0\n');
   });
 
   it('prints init as machine-readable JSON', async () => {

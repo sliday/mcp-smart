@@ -23,14 +23,17 @@ function restoreEnv(name: keyof typeof originalEnv) {
 
 describe('canonical MCP integration', () => {
   let server: SmartAdvisorServer;
+  let consoleError: {mockRestore(): void};
 
   beforeAll(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     process.env.OPENROUTER_API_KEY = 'integration-key';
     process.env.RATE_LIMIT_REQUESTS = '100';
     server = new SmartAdvisorServer();
   });
 
   afterAll(() => {
+    consoleError.mockRestore();
     restoreEnv('OPENROUTER_API_KEY');
     restoreEnv('RATE_LIMIT_REQUESTS');
   });
@@ -95,6 +98,42 @@ describe('canonical MCP integration', () => {
       }]);
       expect(JSON.stringify(result)).not.toContain('must-not-leak');
       expect(JSON.stringify(result)).not.toContain('private prompt');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('propagates MCP request cancellation to the OpenRouter request', async () => {
+    post.mockReset();
+    let providerSignal: AbortSignal | undefined;
+    post.mockImplementationOnce((_url, _body, config) => {
+      providerSignal = config?.signal as AbortSignal | undefined;
+      if (!providerSignal) {
+        return Promise.resolve({data: {choices: [{message: {content: 'ok'}}]}, headers: {}}) as never;
+      }
+      return new Promise((_resolve, reject) => {
+        providerSignal?.addEventListener('abort', () => reject({code: 'ERR_CANCELED'}));
+      }) as never;
+    });
+    const transportServer = new SmartAdvisorServer();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({name: 'integration-test', version: '1.0.0'});
+    await (transportServer as any).server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const controller = new AbortController();
+
+    try {
+      const pending = client.callTool({
+        name: 'consult',
+        arguments: {task: 'cancel transport request'},
+      }, undefined, {signal: controller.signal});
+      await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
+      expect(providerSignal).toBeInstanceOf(AbortSignal);
+      expect(providerSignal).not.toBe(controller.signal);
+      controller.abort();
+      await expect(pending).rejects.toBeDefined();
+      await vi.waitFor(() => expect(providerSignal?.aborted).toBe(true));
+      expect(post).toHaveBeenCalledOnce();
     } finally {
       await client.close();
     }

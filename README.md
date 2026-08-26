@@ -14,7 +14,7 @@ mcp-smart ask "Review this API design for failure modes"
 mcp-smart tui
 ```
 
-`mcp-smart doctor` checks Node.js, terminal support, key presence, OpenRouter authentication, and the default route. MCP Smart reads the key from `OPENROUTER_API_KEY`; it does not save the key.
+`mcp-smart doctor` checks Node.js, terminal support, key presence, OpenRouter authentication, and the local OpenRouter Auto configuration. MCP Smart reads the key from `OPENROUTER_API_KEY`; it does not save the key.
 
 Run `mcp-smart init` for copyable setup guidance. Add `--json` to `init`, `doctor`, or `ask` when a script needs structured output.
 
@@ -29,6 +29,8 @@ Run `mcp-smart tui` to open the Ink interface in the terminal alternate screen. 
 - Last Receipt, for the latest route, model, latency, token, and cost data
 
 The layout uses a navigation rail at 80 columns or wider and a compact header in narrow terminals. It preserves multiline input, indentation, and fenced code.
+
+Choose Custom to enter a direct OpenRouter model ID. MCP Smart keeps one session ID for the TUI conversation so repeated Auto requests retain route affinity.
 
 | Key | Action |
 | --- | --- |
@@ -157,7 +159,7 @@ Each successful consultation returns readable content and typed receipt data:
 
 OpenRouter may omit model, provider, token, task classification, or cost metadata. MCP Smart leaves absent values out of the receipt.
 
-Cache identity includes intent, prompt version, route, preset, Auto restrictions, token limit, task, and context. A cache hit reports its age when available.
+Cache identity includes intent, prompt version, route, preset, Auto restrictions, token limit, session ID, task, and context. A cache hit reports its age when available.
 
 ## Configuration
 

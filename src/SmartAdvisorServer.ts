@@ -527,6 +527,20 @@ function isTransientProviderFailure(error: unknown): boolean {
   return ['REQUEST_TIMEOUT', 'NO_PROVIDER_AVAILABLE'].includes(error.details.code);
 }
 
+function matchesConsultationSchema(raw: Record<string, unknown>): boolean {
+  const presets = new Set(['fast', 'balanced', 'best', 'custom']);
+  const costTiers = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+  const stringArray = (value: unknown) => Array.isArray(value) && value.every(item => typeof item === 'string');
+  return (raw.preset === undefined || typeof raw.preset === 'string' && presets.has(raw.preset))
+    && (raw.model === undefined || typeof raw.model === 'string')
+    && (raw.costTier === undefined || typeof raw.costTier === 'string' && costTiers.has(raw.costTier))
+    && (raw.allowedModels === undefined || stringArray(raw.allowedModels))
+    && (raw.excludedModels === undefined || stringArray(raw.excludedModels))
+    && (raw.maxTokens === undefined || typeof raw.maxTokens === 'number' && Number.isInteger(raw.maxTokens) && raw.maxTokens >= 1)
+    && (raw.sessionId === undefined || typeof raw.sessionId === 'string')
+    && (raw.fresh === undefined || typeof raw.fresh === 'boolean');
+}
+
 export class SmartAdvisorServer {
   private server: Server;
   private config: Config;
@@ -549,7 +563,7 @@ export class SmartAdvisorServer {
     this.server = new Server(
       {
         name: 'smart-advisor',
-        version: '1.5.7',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -723,9 +737,9 @@ export class SmartAdvisorServer {
       return this.listTools();
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       try {
-        return await this.callTool(request.params.name, request.params.arguments);
+        return await this.callTool(request.params.name, request.params.arguments, extra.signal);
       } catch (error) {
         const details = stableErrorDetails(error);
         if (details === undefined) throw error;
@@ -784,7 +798,7 @@ export class SmartAdvisorServer {
     ]};
   }
 
-  async callTool(name: string, args: any): Promise<any> {
+  async callTool(name: string, args: any, signal?: AbortSignal): Promise<any> {
     this.logger.info('Tool call received', {tool: name});
     if (name === 'smart_doctor') return this.diagnosticResult({
       nodeVersion: process.version,
@@ -809,6 +823,9 @@ export class SmartAdvisorServer {
     const context = raw.context ?? '';
     if (typeof task !== 'string' || task.trim().length === 0 || typeof context !== 'string') {
       throw new SmartAdvisorError('A non-empty task and string context are required.', 'INVALID_INPUT');
+    }
+    if (!matchesConsultationSchema(raw)) {
+      throw new SmartAdvisorError('Consultation options must match the advertised tool schema.', 'INVALID_INPUT');
     }
     const validation = this.validateInput(task, context);
     if (!validation.isValid) throw new SmartAdvisorError(validation.error!, 'INVALID_INPUT');
@@ -854,6 +871,7 @@ export class SmartAdvisorServer {
       timeoutMs: this.config.requestTimeout,
       maxAttempts: this.config.maxRetries,
       buildSystemPrompt: () => buildToolSpecificPrompt(promptName),
+      ...(signal ? {signal} : {}),
     });
     const breaker = this.circuitBreakers.get('openrouter');
     const result = breaker
@@ -1231,7 +1249,7 @@ Consider:
         activeWindows: this.rateLimitTracker.size
       },
       circuitBreakers: circuitBreakerStatus,
-      version: '1.5.7'
+      version: '2.0.0'
     };
   }
 

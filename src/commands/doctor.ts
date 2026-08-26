@@ -36,6 +36,7 @@ function nodeCheck(version: string): DoctorCheck {
 async function defaultProbe(apiKey: string): Promise<void> {
   const response = await fetch('https://openrouter.ai/api/v1/key', {
     headers: {Authorization: `Bearer ${apiKey}`},
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error('OpenRouter access check failed.');
 }

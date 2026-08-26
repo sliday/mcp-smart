@@ -171,10 +171,10 @@ This creates a hook where Claude Code automatically invokes the MCP server when 
 ## Publishing & Versioning
 
 - Package published to npm as `mcp-smart`
-- Current version: 1.5.7
+- Current version: 2.0.0
 - Entry point: `dist/index.js` (built from `src/index.ts`)
 - Binary: `mcp-smart` command
-- Prepublish: Automatically runs `npm run build`
+- Prepublish: Automatically runs the tests and `npm run build`
 
 ## Project Structure
 

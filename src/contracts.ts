@@ -98,6 +98,7 @@ export function buildConsultationCacheKey(
     normalizedModels(input.allowedModels),
     normalizedModels(input.excludedModels),
     input.maxTokens ?? null,
+    input.sessionId ?? null,
     input.task,
     input.context ?? null,
   ]);

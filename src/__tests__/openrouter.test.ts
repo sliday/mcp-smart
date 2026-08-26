@@ -121,6 +121,28 @@ describe('OpenRouterClient', () => {
     }));
   });
 
+  it('reports latency across retries and backoff', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    post
+      .mockRejectedValueOnce({response: {status: 503, headers: {}}})
+      .mockImplementationOnce(async () => {
+        now += 50;
+        return response({choices: [{message: {content: 'ok'}}]}) as never;
+      });
+    const client = new OpenRouterClient({
+      apiKey: 'key',
+      delay: async milliseconds => { now += milliseconds; },
+    });
+
+    try {
+      const result = await client.consult({task: 'x'});
+      expect(result.receipt.latencyMs).toBe(300);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('does not invent absent response metadata', async () => {
     post.mockResolvedValue(response({choices: [{message: {content: 'ok'}}]}) as never);
     const result = await new OpenRouterClient({apiKey: 'key'}).consult({task: 'x'});

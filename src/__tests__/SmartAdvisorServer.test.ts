@@ -9,6 +9,7 @@ vi.mock('axios', async importOriginal => {
 
 const post = vi.mocked(axios.post);
 const originalEnv = {...process.env};
+let consoleError: {mockRestore(): void};
 
 function providerResponse(answer = 'Answer') {
   return {data: {id: 'gen-1', model: 'model/selected', choices: [{message: {content: answer}}]}, headers: {}};
@@ -16,6 +17,7 @@ function providerResponse(answer = 'Answer') {
 
 describe('SmartAdvisorServer canonical MCP contract', () => {
   beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     process.env.OPENROUTER_API_KEY = 'test-key';
     process.env.RATE_LIMIT_REQUESTS = '100';
     process.env.CACHE_TTL = '300000';
@@ -24,6 +26,7 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
   });
 
   afterEach(() => {
+    consoleError.mockRestore();
     process.env = {...originalEnv};
   });
 
@@ -85,6 +88,39 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     expect(cached.structuredContent.receipt).toMatchObject({cacheHit: true, cacheAgeMs: expect.any(Number)});
   });
 
+  it('does not share cached results between sessions', async () => {
+    post
+      .mockResolvedValueOnce(providerResponse('session one') as never)
+      .mockResolvedValueOnce(providerResponse('session two') as never);
+    const server = new SmartAdvisorServer();
+
+    const first = await server.callTool('consult', {task: 'same', sessionId: 'session-1'});
+    const second = await server.callTool('consult', {task: 'same', sessionId: 'session-2'});
+
+    expect(first.structuredContent.answer).toBe('session one');
+    expect(second.structuredContent.answer).toBe('session two');
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {preset: 'unknown'},
+    {costTier: 'unlimited'},
+    {model: 42},
+    {allowedModels: ['model/a', 42]},
+    {excludedModels: 'model/b'},
+    {maxTokens: 0},
+    {maxTokens: 1.5},
+    {sessionId: 42},
+    {fresh: 'yes'},
+  ])('rejects consultation options outside the advertised schema: %j', async invalid => {
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'validate', ...invalid})).rejects.toMatchObject({
+      details: {code: 'INVALID_INPUT'},
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it('exposes safe doctor and status diagnostics before consultation limits', async () => {
     process.env.RATE_LIMIT_REQUESTS = '0';
     const server = new SmartAdvisorServer();
@@ -92,7 +128,11 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     const status = await server.callTool('smart_status', {});
     expect(doctor.structuredContent).toMatchObject({apiKeyPresent: true, nodeVersion: expect.any(String)});
     expect(JSON.stringify(doctor)).not.toContain('test-key');
-    expect(status.structuredContent).toMatchObject({status: expect.any(String), circuitBreakers: expect.any(Object)});
+    expect(status.structuredContent).toMatchObject({
+      status: expect.any(String),
+      circuitBreakers: expect.any(Object),
+      version: '2.0.0',
+    });
   });
 
   it('returns a stable local rate-limit error', async () => {

@@ -73,6 +73,7 @@ describe('consultation contracts', () => {
       allowedModels: ['model/a'],
       excludedModels: ['model/b'],
       maxTokens: 321,
+      sessionId: 'session-1',
     };
     const key = buildConsultationCacheKey(base, 'v2');
     const variants: Array<[ConsultInput, string]> = [
@@ -84,6 +85,7 @@ describe('consultation contracts', () => {
       [{...base, allowedModels: ['model/c']}, 'v2'],
       [{...base, excludedModels: ['model/c']}, 'v2'],
       [{...base, maxTokens: 322}, 'v2'],
+      [{...base, sessionId: 'session-2'}, 'v2'],
       [{...base, task: 'task'}, 'v2'],
       [{...base, context: 'context'}, 'v2'],
     ];

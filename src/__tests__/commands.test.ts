@@ -65,6 +65,7 @@ describe('command workflows', () => {
     expect(result.checks.openRouter).toEqual({status: 'ok'});
     expect(fetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', {
       headers: {Authorization: 'Bearer not-for-output'},
+      signal: expect.any(AbortSignal),
     });
     expect(JSON.stringify(result)).not.toContain('not-for-output');
   });
@@ -79,6 +80,7 @@ describe('command workflows', () => {
 
       expect(mockedFetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', {
         headers: {Authorization: `Bearer ${sentinelKey}`},
+        signal: expect.any(AbortSignal),
       });
       expect(result.checks.openRouter).toEqual({
         status: 'failed',

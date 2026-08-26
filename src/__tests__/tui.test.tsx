@@ -150,7 +150,11 @@ describe('Ink terminal interface', () => {
     await press(view, '\r');
 
     await vi.waitFor(() => expect(frame(view)).toContain('Use the safer approach.'));
-    expect(consult).toHaveBeenCalledWith(expect.objectContaining({task, preset: 'balanced'}), expect.any(AbortSignal));
+    expect(consult).toHaveBeenCalledWith(expect.objectContaining({
+      task,
+      preset: 'balanced',
+      sessionId: expect.any(String),
+    }), expect.any(AbortSignal));
     expect(frame(view)).toContain('Receipt');
     expect(frame(view)).toContain('requestedModel: openrouter/auto');
   });
@@ -239,6 +243,15 @@ describe('Ink terminal interface', () => {
     expect(onExit).toHaveBeenCalledOnce();
   });
 
+  it('exits on Ctrl+C when no request is active', async () => {
+    const onExit = vi.fn();
+    const view = render(<App terminalWidth={100} onExit={onExit} dependencies={dependencies()}/>);
+
+    await press(view, '\u0003');
+
+    expect(onExit).toHaveBeenCalledOnce();
+  });
+
   it('retains and labels a successful compare answer when the other advisor fails', async () => {
     const consult = vi.fn()
       .mockResolvedValueOnce({answer: 'Advisor one answer', receipt: {...receipt, model: undefined}})
@@ -254,9 +267,8 @@ describe('Ink terminal interface', () => {
     await vi.waitFor(() => expect(frame(view)).toContain('Advisor one answer'));
     expect(frame(view)).toContain('Failed');
     expect(frame(view)).toContain('Try another advisor.');
-    expect(frame(view)).toContain('Agreements');
-    expect(frame(view)).toContain('Conflicts');
-    expect(frame(view)).toContain('Recommendation');
+    expect(frame(view)).toContain('Compare results');
+    expect(frame(view)).not.toContain('successful advice is retained');
     expect(consult).toHaveBeenCalledTimes(2);
     expect(consult).not.toHaveBeenCalledWith(expect.objectContaining({model: 'openrouter/auto'}), expect.anything());
   });

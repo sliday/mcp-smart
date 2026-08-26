@@ -146,10 +146,11 @@ export class OpenRouterClient {
       });
     }
 
+    const startedAt = Date.now();
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
       try {
-        return await this.send(input);
+        return await this.send(input, startedAt);
       } catch (error) {
         lastError = error;
         if (!isTransient(error) || attempt === this.maxAttempts) break;
@@ -159,7 +160,7 @@ export class OpenRouterClient {
     throw new OpenRouterError(normalizeOpenRouterError(lastError));
   }
 
-  private async send(input: ConsultInput): Promise<ConsultationResult> {
+  private async send(input: ConsultInput, startedAt: number): Promise<ConsultationResult> {
     const route = resolveRoute(input);
     const userMessage = input.context
       ? `Task: ${input.task}\n\nAdditional Context: ${input.context}`
@@ -183,7 +184,6 @@ export class OpenRouterClient {
     }
     if (input.sessionId !== undefined) body.session_id = input.sessionId;
 
-    const startedAt = Date.now();
     const response = await axios.post<OpenRouterResponse>(OPENROUTER_URL, body, {
       headers: {
         Authorization: `Bearer ${this.options.apiKey}`,
