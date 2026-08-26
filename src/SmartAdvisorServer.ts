@@ -58,7 +58,7 @@ const MODELS = {
   'google': 'google/gemini-3.1-pro-preview',
   'openai': 'openai/gpt-5-pro',
   'xai': 'x-ai/grok-4.6',
-  'claude': 'anthropic/claude-sonnet-4.5',
+  'claude': 'anthropic/claude-sonnet-5',
   'moonshot': 'moonshotai/kimi-k2-thinking',
   'router': 'openai/gpt-5-mini' // For routing decisions
 } as const;
@@ -92,7 +92,7 @@ const MODEL_NAMES = {
   'google': 'Google Gemini 3 Pro',
   'openai': 'OpenAI GPT-5 Pro',
   'xai': 'xAI Grok 4',
-  'claude': 'Anthropic Claude Sonnet 4.5',
+  'claude': 'Anthropic Claude Sonnet 5',
   'moonshot': 'Moonshot Kimi-K2 Thinking',
   'router': 'GPT-5 Mini Router'
 } as const;
@@ -146,7 +146,7 @@ const PROVIDER_SPECS = {
 // Model routing strategies
 const ROUTING_STRATEGIES = {
   'auto': 'Let GPT-4o-mini choose the best provider for this specific task',
-  'intelligence': 'Prioritize the most capable model (Claude Sonnet 4)',
+  'intelligence': 'Prioritize the most capable model (Claude Sonnet 5)',
   'cost': 'Prioritize the most cost-effective model (DeepSeek)',
   'balance': 'Balance cost and performance (Google Gemini Flash)',
   'speed': 'Prioritize fastest responses (xAI Grok)',
@@ -158,7 +158,7 @@ const ROUTING_STRATEGIES = {
   'google': 'Force Google Gemini Flash', 
   'openai': 'Force OpenAI o3',
   'xai': 'Force xAI Grok',
-  'claude': 'Force Claude Sonnet 4',
+  'claude': 'Force Claude Sonnet 5',
   'moonshot': 'Force Moonshot Kimi-K2'
 } as const;
 
@@ -1257,7 +1257,7 @@ export class SmartAdvisorServer {
         const routingPrompt = `You are a smart routing system that selects the best AI provider for a given coding task.
 
 Available providers (ranked by intelligence):
-1. Claude Sonnet 4.5: Ultimate intelligence, supreme reasoning, ethical coding, comprehensive solutions
+1. Claude Sonnet 5: Ultimate intelligence, supreme reasoning, ethical coding, comprehensive solutions
 2. OpenAI GPT-5 Pro: Very high intelligence, complex reasoning, creativity, advanced coding
 3. xAI Grok 4: Very high intelligence, fast responses, real-time data, creative thinking
 4. Google Gemini 3 Pro: Very high intelligence, fast, large context (2M tokens), multimodal

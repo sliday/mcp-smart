@@ -328,15 +328,15 @@ describe('Ink terminal interface', () => {
     await press(view, '\u001b[C');
     await press(view, '\t');
     expect(frame(view)).toContain('Model ID');
-    await press(view, 'anthropic/claude-sonnet-4.5');
-    expect(frame(view)).toContain('Consult · anthropic/claude-sonnet-4.5 · Custom');
+    await press(view, 'anthropic/claude-sonnet-5');
+    expect(frame(view)).toContain('Consult · anthropic/claude-sonnet-5 · Custom');
     await press(view, '\t');
     await press(view, '\r');
 
     await vi.waitFor(() => expect(consult).toHaveBeenCalledOnce());
     expect(consult).toHaveBeenCalledWith(expect.objectContaining({
       task: 'Review',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-5',
       preset: 'custom',
     }), expect.any(AbortSignal));
   });

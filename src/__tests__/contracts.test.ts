@@ -26,8 +26,8 @@ describe('consultation contracts', () => {
   });
 
   it('omits the Auto plugin for a direct model', () => {
-    expect(resolveRoute({task: 'x', model: 'anthropic/claude-sonnet-4.5'})).toEqual({
-      model: 'anthropic/claude-sonnet-4.5',
+    expect(resolveRoute({task: 'x', model: 'anthropic/claude-sonnet-5'})).toEqual({
+      model: 'anthropic/claude-sonnet-5',
       preset: 'custom',
     });
   });
@@ -52,7 +52,7 @@ describe('consultation contracts', () => {
   });
 
   it('preserves Auto restrictions without sharing mutable arrays', () => {
-    const allowedModels = ['openai/gpt-5', 'anthropic/claude-sonnet-4.5'];
+    const allowedModels = ['openai/gpt-5', 'anthropic/claude-sonnet-5'];
     const excludedModels = ['google/gemini-flash'];
     const route = resolveRoute({task: 'x', allowedModels, excludedModels, maxTokens: 900});
 

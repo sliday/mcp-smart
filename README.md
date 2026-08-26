@@ -156,7 +156,7 @@ Each successful canonical `consult` call returns readable content and typed rece
   "receipt": {
     "requestId": "req-123",
     "requestedModel": "openrouter/auto",
-    "selectedModel": "anthropic/claude-sonnet-4.5",
+    "selectedModel": "anthropic/claude-sonnet-5",
     "provider": "Anthropic",
     "preset": "balanced",
     "costTier": "medium",
