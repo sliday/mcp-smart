@@ -67,3 +67,18 @@ string index signature; narrowing the formatter input from
 `Record<string, unknown>` to `object` preserved optional-field omission and made
 the build green. Non-interactive smokes for `init --json`, missing-key `doctor
 --json`, `--help`, and `--version` all exit successfully without a key.
+
+The command boundary’s authenticated Doctor probe was corrected after review.
+Official OpenRouter documentation identifies `GET /api/v1/key` as the current
+authenticated-key endpoint and lists 401 for unauthorized credentials; the model
+catalog is not sufficient proof of key validity. The retained command child
+captured RED/GREEN and committed the endpoint plus mocked 401 regression at
+`58290ed`; the parent merged it as `41b7491`. Focused command/CLI verification
+passes 17/17 plus TypeScript build.
+
+The Ink child delivered its initial TUI commit `c42abe3` with 9 focused and 80
+full tests. It remains active on a narrow review-correction pass for default Ink
+exit behavior, real Shift+Enter coverage, and terminal punctuation. Do not merge
+the child until that correction commit, clean ownership state, keyboard and
+cancellation review, and an independent focused/build gate are complete. The
+child branch/worktree remain available.
