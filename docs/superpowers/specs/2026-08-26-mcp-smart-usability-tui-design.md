@@ -33,7 +33,7 @@ The package will never store an OpenRouter key. Setup screens and generated exam
 | `mcp-smart` | Start the MCP stdio server. |
 | `mcp-smart tui` | Open the interactive terminal interface. |
 | `mcp-smart init` | Print client configuration and environment setup instructions. |
-| `mcp-smart doctor` | Check Node, terminal, API key presence, OpenRouter access, and the default route. |
+| `mcp-smart doctor` | Check Node, terminal, API key presence, OpenRouter access, and the local default-route configuration. |
 | `mcp-smart ask [task]` | Run one consultation and print the answer followed by a compact receipt. |
 | `mcp-smart --help` | Print command help without constructing the server or requiring an API key. |
 | `mcp-smart --version` | Print the package version without constructing the server. |
@@ -77,7 +77,7 @@ The form will preserve line breaks, indentation, and code fences. It will never 
 
 ### Compare Flow
 
-Compare will request two to four advisors. The first release will default to two. It will exclude the routing model from the advisor set, preserve partial successes, show each model's cost, and label failed responses. The result will end with agreements, conflicts, and a recommendation.
+Compare will request two to four advisors. The first release will default to two. It will exclude the routing model from the advisor set, preserve partial successes, show each model's cost, and label failed responses.
 
 ## Routing Contract
 
@@ -162,6 +162,7 @@ The cache key will include:
 - Selected route and preset
 - Auto restrictions
 - Maximum tokens
+- Session ID
 - Task and context
 
 `fresh: true` will bypass cache reads. A cached response will carry its age in the receipt.
@@ -244,4 +245,3 @@ These changes can follow after the local CLI and MCP contracts prove stable.
 - Code indentation and fences survive input handling.
 - The cache separates intents, prompt versions, route settings, and token limits.
 - The package builds and all tests pass on Node 22.
-

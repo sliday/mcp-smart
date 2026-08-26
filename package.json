@@ -1,6 +1,6 @@
 {
   "name": "mcp-smart",
-  "version": "1.5.7",
+  "version": "2.0.0",
   "description": "MCP server providing multi-advisor AI consultations via OpenRouter API with advanced caching, rate limiting, and security features",
   "main": "dist/index.js",
   "type": "module",
@@ -19,7 +19,7 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm test -- --run && npm run build"
   },
   "keywords": [
     "mcp",
@@ -46,17 +46,21 @@
     "url": "https://github.com/sliday/mcp-smart/issues"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "ink": "^7.1.1",
+    "react": "^19.2.8"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
     "@vitest/coverage-v8": "^1.0.0",
-    "typescript": "^5.0.0",
+    "ink-testing-library": "^4.0.0",
     "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
     "vitest": "^1.0.0"
   }
 }

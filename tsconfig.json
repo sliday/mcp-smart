@@ -6,6 +6,7 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "allowJs": true,
+    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
