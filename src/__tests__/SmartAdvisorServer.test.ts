@@ -136,6 +136,28 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     });
   });
 
+  it('does not open the circuit breaker for a non-retryable provider failure', async () => {
+    process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
+    post
+      .mockRejectedValueOnce({response: {status: 500, headers: {}}})
+      .mockResolvedValueOnce(providerResponse('available next time') as never);
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'non-retryable failure'})).rejects.toMatchObject({
+      details: {code: 'PROVIDER_UNAVAILABLE'},
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+    await expect(server.callTool('consult', {task: 'next call'})).resolves.toMatchObject({
+      structuredContent: {answer: 'available next time'},
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(server.getCircuitBreakerMetrics().openrouter).toMatchObject({
+      state: 'CLOSED',
+      failures: 0,
+      consecutiveFailures: 0,
+    });
+  });
+
   it('does not retry or poison the circuit breaker after cancellation', async () => {
     process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
     post

@@ -524,8 +524,7 @@ class CircuitBreaker {
 
 function isTransientProviderFailure(error: unknown): boolean {
   if (!(error instanceof OpenRouterError)) return false;
-  return ['REQUEST_TIMEOUT', 'NO_PROVIDER_AVAILABLE', 'PROVIDER_UNAVAILABLE']
-    .includes(error.details.code);
+  return ['REQUEST_TIMEOUT', 'NO_PROVIDER_AVAILABLE'].includes(error.details.code);
 }
 
 export class SmartAdvisorServer {
