@@ -397,6 +397,25 @@ class SmartAdvisorError extends Error {
   }
 }
 
+function stableErrorDetails(error: unknown): SmartErrorDetails | undefined {
+  if (typeof error !== 'object' || error === null || !('details' in error)) return undefined;
+  const details = (error as {details?: unknown}).details;
+  if (typeof details !== 'object' || details === null) return undefined;
+  const record = details as Record<string, unknown>;
+  if (typeof record.code !== 'string' || typeof record.message !== 'string' ||
+      typeof record.action !== 'string') return undefined;
+  const safe: SmartErrorDetails = {
+    code: record.code,
+    message: record.message,
+    action: record.action,
+  };
+  if (typeof record.requestId === 'string') safe.requestId = record.requestId;
+  if (typeof record.retryAfterMs === 'number' && Number.isFinite(record.retryAfterMs)) {
+    safe.retryAfterMs = record.retryAfterMs;
+  }
+  return safe;
+}
+
 class CircuitBreaker {
   private metrics: CircuitBreakerMetrics;
   private config: CircuitBreakerConfig;
@@ -706,7 +725,13 @@ export class SmartAdvisorServer {
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      return this.callTool(request.params.name, request.params.arguments);
+      try {
+        return await this.callTool(request.params.name, request.params.arguments);
+      } catch (error) {
+        const details = stableErrorDetails(error);
+        if (details === undefined) throw error;
+        return this.errorResult(details);
+      }
     });
   }
 
@@ -733,8 +758,23 @@ export class SmartAdvisorServer {
       properties: {
         answer: {type: 'string'},
         receipt: {type: 'object', additionalProperties: true},
+        error: {
+          type: 'object',
+          properties: {
+            code: {type: 'string'},
+            message: {type: 'string'},
+            action: {type: 'string'},
+            requestId: {type: 'string'},
+            retryAfterMs: {type: 'number'},
+          },
+          required: ['code', 'message', 'action'],
+          additionalProperties: false,
+        },
       },
-      required: ['answer', 'receipt'],
+      oneOf: [
+        {required: ['answer', 'receipt']},
+        {required: ['error']},
+      ],
     };
     const diagnosticSchema = {type: 'object', properties: {}, additionalProperties: true};
 
@@ -847,6 +887,17 @@ export class SmartAdvisorServer {
 
   private diagnosticResult(data: Record<string, unknown>): any {
     return {content: [{type: 'text', text: JSON.stringify(data, null, 2)}], structuredContent: data};
+  }
+
+  private errorResult(details: SmartErrorDetails): any {
+    return {
+      content: [{
+        type: 'text',
+        text: `${details.message} Action: ${details.action} (${details.code})`,
+      }],
+      structuredContent: {error: details},
+      isError: true,
+    };
   }
 
   private async consultAllAdvisors(task: string, context: string, toolName: string = 'smart_advisor') {

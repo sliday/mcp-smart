@@ -1,4 +1,6 @@
 import axios from 'axios';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {SmartAdvisorServer} from '../SmartAdvisorServer.js';
 
@@ -51,5 +53,50 @@ describe('canonical MCP integration', () => {
     post.mockResolvedValue({data: {choices: [{message: {content: 'legacy ok'}}]}, headers: {}} as never);
     const result = await server.callTool('code_review', {task: 'review'});
     expect(result.structuredContent.answer).toBe('legacy ok');
+  });
+
+  it('returns stable domain errors across the actual MCP transport', async () => {
+    post.mockRejectedValueOnce({
+      response: {
+        status: 401,
+        headers: {'x-request-id': 'safe-request-id'},
+      },
+      config: {
+        headers: {Authorization: 'Bearer must-not-leak'},
+        data: 'private prompt',
+      },
+    });
+    const transportServer = new SmartAdvisorServer();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({name: 'integration-test', version: '1.0.0'});
+    await (transportServer as any).server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await client.listTools();
+
+    try {
+      const result = await client.callTool({
+        name: 'consult',
+        arguments: {task: 'transport failure'},
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: {
+            code: 'AUTHENTICATION_FAILED',
+            message: 'OpenRouter authentication failed.',
+            action: 'Check OPENROUTER_API_KEY and try again.',
+            requestId: 'safe-request-id',
+          },
+        },
+      });
+      expect(result.content).toEqual([{
+        type: 'text',
+        text: 'OpenRouter authentication failed. Action: Check OPENROUTER_API_KEY and try again. (AUTHENTICATION_FAILED)',
+      }]);
+      expect(JSON.stringify(result)).not.toContain('must-not-leak');
+      expect(JSON.stringify(result)).not.toContain('private prompt');
+    } finally {
+      await client.close();
+    }
   });
 });

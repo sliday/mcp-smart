@@ -143,3 +143,12 @@ Compatibility-route RED: contracts ran 10 tests with 2 failures (literal
 adjacent server suites 13/13. `smart-auto` now resolves to direct
 `openai/gpt-5-mini` with custom preset and no plugin, and all direct routes omit
 unapplied Auto cost tiers from resolved routes and receipts.
+
+MCP-transport RED: the integration suite ran 4 tests with 1 failure; SDK
+`Client.callTool()` rejected with JSON-RPC internal error `-32603`. GREEN:
+integration 4/4 and both server suites 14/14. The registered MCP request handler
+now catches only validated stable domain details and returns safe readable
+content, `{error: SmartErrorDetails}` structured content, and `isError: true`.
+The advertised consult output schema accepts either the existing success shape
+or the typed error shape, while direct public `callTool()` retains its throwing
+behavior and signature.
