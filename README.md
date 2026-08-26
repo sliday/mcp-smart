@@ -188,7 +188,7 @@ Cache identity includes intent, prompt version, route, preset, Auto restrictions
 | `MAX_CACHE_SIZE` | `100` | Maximum cached responses |
 | `MAX_TASK_LENGTH` | `10000` | Maximum task length |
 | `MAX_CONTEXT_LENGTH` | `20000` | Maximum context length |
-| `RATE_LIMIT_REQUESTS` | `10` | Local requests per window |
+| `RATE_LIMIT_REQUESTS` | `10` | Local requests per window; `0` disables the limiter |
 | `RATE_LIMIT_WINDOW` | `60000` | Local rate-limit window in milliseconds |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Failures before opening a circuit |
 | `CIRCUIT_BREAKER_RECOVERY_TIMEOUT` | `60000` | Open-circuit recovery delay in milliseconds |

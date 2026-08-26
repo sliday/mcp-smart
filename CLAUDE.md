@@ -119,7 +119,7 @@ All configuration via environment variables (see `loadConfig()` in SmartAdvisorS
 - `MAX_CACHE_SIZE=100`: Maximum cached responses
 - `MAX_TASK_LENGTH=10000`: Maximum task input length
 - `MAX_CONTEXT_LENGTH=20000`: Maximum context input length
-- `RATE_LIMIT_REQUESTS=10`: Requests per window
+- `RATE_LIMIT_REQUESTS=10`: Requests per window (`0` disables the limiter)
 - `RATE_LIMIT_WINDOW=60000`: Rate limit window (1 minute)
 
 ### Circuit Breaker Configuration
