@@ -386,6 +386,27 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     });
   });
 
+  it('treats a zero request limit as unlimited', async () => {
+    process.env.RATE_LIMIT_REQUESTS = '0';
+    post.mockResolvedValue(providerResponse() as never);
+    const server = new SmartAdvisorServer();
+
+    await server.callTool('consult', {task: 'one'});
+    await server.callTool('consult', {task: 'two'});
+
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps healthy status when the bounded cache reaches capacity', async () => {
+    process.env.MAX_CACHE_SIZE = '1';
+    post.mockResolvedValue(providerResponse() as never);
+    const server = new SmartAdvisorServer();
+
+    await server.callTool('consult', {task: 'fill cache'});
+
+    expect(server.getHealthCheck()).toMatchObject({status: 'healthy', cache: {size: 1}});
+  });
+
   it('returns a stable circuit-breaker error without another provider call', async () => {
     process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
     post.mockRejectedValue({response: {status: 503, headers: {}}});
@@ -453,6 +474,36 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     await expect(server.callTool('consult', {task: 'next trial'})).resolves.toMatchObject({
       structuredContent: {answer: 'recovered'},
     });
+  });
+
+  it('keeps concurrent half-open trials active until every admitted trial settles', async () => {
+    process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
+    process.env.CIRCUIT_BREAKER_RECOVERY_TIMEOUT = '0';
+    process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS = '2';
+    process.env.MAX_RETRIES = '1';
+    post.mockRejectedValueOnce({response: {status: 503, headers: {}}});
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'open circuit'})).rejects.toMatchObject({
+      details: {code: 'NO_PROVIDER_AVAILABLE'},
+    });
+
+    let resolveSuccess: ((value: unknown) => void) | undefined;
+    let rejectFailure: ((reason: unknown) => void) | undefined;
+    post
+      .mockImplementationOnce(() => new Promise(resolve => { resolveSuccess = resolve; }) as never)
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFailure = reject; }) as never);
+
+    const successfulTrial = server.callTool('consult', {task: 'successful trial'});
+    const failedTrial = server.callTool('consult', {task: 'failed trial'});
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    resolveSuccess?.(providerResponse('recovered'));
+    await expect(successfulTrial).resolves.toMatchObject({structuredContent: {answer: 'recovered'}});
+    expect(server.getCircuitBreakerMetrics().openrouter.state).toBe('HALF_OPEN');
+
+    rejectFailure?.({response: {status: 503, headers: {}}});
+    await expect(failedTrial).rejects.toMatchObject({details: {code: 'NO_PROVIDER_AVAILABLE'}});
+    expect(server.getCircuitBreakerMetrics().openrouter.state).toBe('OPEN');
   });
 
   it('does not open the circuit breaker for a non-retryable provider failure', async () => {
