@@ -20,7 +20,7 @@
 
 - Made the first Ctrl+C cancel an active request and the second exit with code 130 while restoring the terminal on both paths.
 - Propagated cancellation through MCP, CLI, TUI, OpenRouter retries, and legacy `all` fan-out requests.
-- Routed the six user-facing legacy advisors through circuit-breaker health accounting, excluded the routing-only model, rejected all-failed consultations, and kept failed responses out of the cache.
+- Routed the six user-facing legacy advisors through circuit-breaker health accounting, honored per-request token budgets and cache isolation, excluded the routing-only model, rejected all-failed consultations, and kept failed responses out of the cache.
 - Rejected OpenRouter provider errors embedded in HTTP 200 responses instead of caching partial content as a successful answer.
 - Prevented stale Doctor and Setup completions from replacing the current screen, and bounded Doctor network checks.
 - Kept long task previews within small terminals and removed empty answer controls from all-failed comparisons.

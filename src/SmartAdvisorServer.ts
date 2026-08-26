@@ -924,6 +924,7 @@ export class SmartAdvisorServer {
         return this.consultAllAdvisors(task, context, name, {
           sessionId: raw.sessionId,
           fresh: raw.fresh,
+          maxTokens: raw.maxTokens,
         }, signal);
       }
       if (model === 'random') {
@@ -1018,10 +1019,10 @@ export class SmartAdvisorServer {
     task: string,
     context: string,
     toolName: string = 'smart_advisor',
-    requestOptions: Pick<ConsultInput, 'sessionId' | 'fresh'> = {},
+    requestOptions: Pick<ConsultInput, 'sessionId' | 'fresh' | 'maxTokens'> = {},
     signal?: AbortSignal,
   ) {
-    const cacheKey = JSON.stringify(['legacy-all-v2', toolName, requestOptions.sessionId ?? null, task, context]);
+    const cacheKey = JSON.stringify(['legacy-all-v2', toolName, requestOptions.sessionId ?? null, requestOptions.maxTokens ?? null, task, context]);
     const cached = requestOptions.fresh ? null : this.getCachedResponse(cacheKey);
     if (requestOptions.fresh) {
       this.cacheMetrics.totalRequests++;
@@ -1055,7 +1056,7 @@ export class SmartAdvisorServer {
       const startTime = Date.now();
       try {
         this.logger.debug('Starting advisor query', { model: modelKey, tool: toolName });
-        const consult = () => client.consult({task, context, model: MODELS[modelKey], preset: 'custom'});
+        const consult = () => client.consult({task, context, model: MODELS[modelKey], preset: 'custom', maxTokens: requestOptions.maxTokens});
         const response = (await (circuitBreaker
           ? circuitBreaker.execute(consult, isTransientProviderFailure)
           : consult())).answer;

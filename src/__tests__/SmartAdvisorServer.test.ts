@@ -202,6 +202,27 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     expect(post).toHaveBeenCalledTimes(24);
   });
 
+  it('forwards maxTokens to every legacy all advisor', async () => {
+    process.env.MAX_TOKENS = '77';
+    post.mockResolvedValue(providerResponse('advisor') as never);
+    const server = new SmartAdvisorServer();
+
+    await server.callTool('smart_advisor', {task: 'budgeted', model: 'all', maxTokens: 1});
+
+    expect(post).toHaveBeenCalledTimes(6);
+    expect(post.mock.calls.map(call => (call[1] as any).max_tokens)).toEqual(Array(6).fill(1));
+  });
+
+  it('isolates legacy all cache entries by maxTokens', async () => {
+    post.mockResolvedValue(providerResponse('advisor') as never);
+    const server = new SmartAdvisorServer();
+
+    await server.callTool('smart_advisor', {task: 'budgeted', model: 'all', maxTokens: 1});
+    await server.callTool('smart_advisor', {task: 'budgeted', model: 'all', maxTokens: 2});
+
+    expect(post).toHaveBeenCalledTimes(12);
+  });
+
   it('preserves task and context whitespace and fences', async () => {
     post.mockResolvedValue(providerResponse() as never);
     const task = '  review\n```ts\n  const x = 1;\n```  ';
