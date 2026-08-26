@@ -11,6 +11,9 @@ export default defineConfig({
       exclude: [
         'node_modules/',
         'dist/',
+        '.fractal/',
+        'wiki/.obsidian/',
+        'wiki/.wiki/',
         '**/*.d.ts',
         'vitest.config.ts',
       ],

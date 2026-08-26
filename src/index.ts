@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { SmartAdvisorServer } from './SmartAdvisorServer.js';
+import { runCli } from './cli.js';
 
-const server = new SmartAdvisorServer();
-server.run().catch(console.error);
+process.exitCode = await runCli(process.argv.slice(2), process.env).catch(error => {
+  console.error(error instanceof Error ? error.message : String(error));
+  return 1;
+});
