@@ -5,7 +5,7 @@ import {runAsk} from '../commands/ask.js';
 import {runDoctor, type DoctorResult} from '../commands/doctor.js';
 import {runInit, type CommandResult} from '../commands/init.js';
 import type {ConsultInput, ConsultationPreset, ConsultationReceipt, ConsultationResult} from '../contracts.js';
-import {sanitizeTerminalText} from '../terminal.js';
+import {sanitizeTerminalText, wrapTerminalLine} from '../terminal.js';
 import {TextArea} from './TextArea.js';
 import {theme} from './theme.js';
 
@@ -101,15 +101,7 @@ function sharedTermsText(shared: string[]): string {
 
 function textViewport(text: string, width: number, height: number, requestedPage: number): TextViewport {
   const lineWidth = Math.max(20, width);
-  const lines = sanitizeTerminalText(text).split('\n').flatMap(line => {
-    const characters = [...line];
-    if (characters.length === 0) return [''];
-    const wrapped: string[] = [];
-    for (let offset = 0; offset < characters.length; offset += lineWidth) {
-      wrapped.push(characters.slice(offset, offset + lineWidth).join(''));
-    }
-    return wrapped;
-  });
+  const lines = sanitizeTerminalText(text).split('\n').flatMap(line => wrapTerminalLine(line, lineWidth));
   const pageSize = Math.max(3, height);
   const pages = Math.max(1, Math.ceil(lines.length / pageSize));
   const page = Math.min(Math.max(0, requestedPage), pages - 1);

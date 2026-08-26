@@ -527,6 +527,34 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
     expect(server.getCircuitBreakerMetrics().openrouter.state).toBe('OPEN');
   });
 
+  it('ignores a stale half-open failure after a manual reset', async () => {
+    process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
+    process.env.CIRCUIT_BREAKER_RECOVERY_TIMEOUT = '0';
+    process.env.CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS = '1';
+    process.env.MAX_RETRIES = '1';
+    post.mockRejectedValueOnce({response: {status: 503, headers: {}}});
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'open circuit'})).rejects.toMatchObject({
+      details: {code: 'NO_PROVIDER_AVAILABLE'},
+    });
+
+    let rejectTrial: ((reason: unknown) => void) | undefined;
+    post.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectTrial = reject; }) as never);
+    const pendingTrial = server.callTool('consult', {task: 'stale trial'});
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(server.getCircuitBreakerMetrics().openrouter.state).toBe('HALF_OPEN');
+    expect(server.resetCircuitBreaker('openrouter')).toBe(true);
+
+    rejectTrial?.({response: {status: 503, headers: {}}});
+    await expect(pendingTrial).rejects.toMatchObject({details: {code: 'NO_PROVIDER_AVAILABLE'}});
+    expect(server.getCircuitBreakerMetrics().openrouter).toMatchObject({
+      state: 'CLOSED',
+      failures: 0,
+      consecutiveFailures: 0,
+    });
+  });
+
   it('does not open the circuit breaker for a non-retryable provider failure', async () => {
     process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD = '1';
     post

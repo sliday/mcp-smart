@@ -224,6 +224,27 @@ describe('Ink terminal interface', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
+  it('deletes complete emoji and combining-mark graphemes', async () => {
+    const onChange = vi.fn();
+    const Harness = (): React.JSX.Element => {
+      const [value, setValue] = React.useState('A🙂e\u0301');
+      const change = (next: string) => {
+        onChange(next);
+        setValue(next);
+      };
+      return <TextArea label="Task" value={value} active onChange={change} onSubmit={vi.fn()}/>;
+    };
+    const view = render(<Harness/>);
+
+    await press(view, '\u007f');
+    await press(view, '\u001b[3~');
+    await press(view, '\u007f');
+
+    expect(onChange).toHaveBeenNthCalledWith(1, 'A🙂');
+    expect(onChange).toHaveBeenNthCalledWith(2, 'A');
+    expect(onChange).toHaveBeenNthCalledWith(3, '');
+  });
+
   it('exits through Ink when q is pressed without an injected exit callback', async () => {
     const view = render(<App terminalWidth={100} dependencies={dependencies()}/>);
     const initialFrames = view.frames.length;
@@ -272,6 +293,21 @@ describe('Ink terminal interface', () => {
     expect(frame(view)).toContain('Result page 2/2');
     expect(frame(view)).toContain('answer-line-11');
     expect(frame(view)).not.toContain('answer-line-00');
+  });
+
+  it('wraps CJK and emoji answers by terminal cells before paging', async () => {
+    const answer = Array.from({length: 10}, (_, index) => `${'界🙂'.repeat(20)}-${index}`).join('\n');
+    const consult = vi.fn().mockResolvedValue({answer, receipt});
+    const view = render(<App terminalWidth={60} terminalHeight={17} initialTask="Review" dependencies={dependencies({consult})}/>);
+
+    await press(view, '\t');
+    await press(view, '\t');
+    await press(view, '\t');
+    await press(view, '\t');
+    await press(view, '\r');
+    await vi.waitFor(() => expect(frame(view)).toContain('Result page 1/3'));
+
+    expect(frame(view).split('\n').length).toBeLessThanOrEqual(17);
   });
 
   it('requires and submits a model ID for the Custom preset', async () => {

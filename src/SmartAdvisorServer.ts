@@ -523,6 +523,10 @@ class CircuitBreaker {
   }
 
   private onFailure(halfOpenTrialGeneration?: number): void {
+    if (halfOpenTrialGeneration !== undefined &&
+        (halfOpenTrialGeneration !== this.halfOpenGeneration || this.metrics.state !== CircuitBreakerState.HALF_OPEN)) {
+      return;
+    }
     this.metrics.failures++;
     this.metrics.consecutiveFailures++;
     this.metrics.lastFailureTime = Date.now();

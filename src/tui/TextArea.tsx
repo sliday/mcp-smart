@@ -1,6 +1,6 @@
 import React from 'react';
 import {Box, Text, useInput} from 'ink';
-import {sanitizeTerminalText} from '../terminal.js';
+import {sanitizeTerminalText, terminalGraphemes, terminalGraphemeWidth, terminalTextWidth, withoutLastTerminalGrapheme} from '../terminal.js';
 
 export interface TextAreaProps {
   label: string;
@@ -12,28 +12,14 @@ export interface TextAreaProps {
   onSubmit: () => void;
 }
 
-function characterWidth(character: string): number {
-  if (/\p{Mark}/u.test(character)) return 0;
-  const codePoint = character.codePointAt(0) ?? 0;
-  return codePoint >= 0x1100 && (
-    codePoint <= 0x115f || codePoint === 0x2329 || codePoint === 0x232a ||
-    codePoint >= 0x2e80 && codePoint <= 0xa4cf ||
-    codePoint >= 0xac00 && codePoint <= 0xd7a3 ||
-    codePoint >= 0xf900 && codePoint <= 0xfaff ||
-    codePoint >= 0xfe10 && codePoint <= 0xfe6f ||
-    codePoint >= 0xff00 && codePoint <= 0xff60 ||
-    codePoint >= 0x1f300
-  ) ? 2 : 1;
-}
-
 function tailWithinColumns(value: string, columns: number): string {
-  const characters = [...value];
-  if (characters.reduce((sum, character) => sum + characterWidth(character), 0) <= columns) return value;
+  const characters = terminalGraphemes(value);
+  if (terminalTextWidth(value) <= columns) return value;
   const visible: string[] = [];
   let width = 1;
   for (let index = characters.length - 1; index >= 0; index--) {
     const character = characters[index]!;
-    const nextWidth = width + characterWidth(character);
+    const nextWidth = width + terminalGraphemeWidth(character);
     if (nextWidth > columns) break;
     visible.unshift(character);
     width = nextWidth;
@@ -50,7 +36,7 @@ export function TextArea({label, value, active = false, maxVisibleLines, maxVisi
       return;
     }
     if (key.backspace || key.delete) {
-      onChange(value.slice(0, -1));
+      onChange(withoutLastTerminalGrapheme(value));
       return;
     }
     if (input.length > 0 && input !== '\u0003') onChange(`${value}${input}`);

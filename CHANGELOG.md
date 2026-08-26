@@ -26,5 +26,7 @@
 - Kept long task previews within small terminals and removed empty answer controls from all-failed comparisons.
 - Isolated cached responses by structured input and session, enforced one shared LRU capacity, bounded model filters and token overrides, rejected unknown options, and validated every optional consultation input at runtime.
 - Counted full retry latency, stopped on quota and rate-limit failures, and omitted malformed provider metadata.
+- Ignored stale half-open failures after a manual circuit-breaker reset.
+- Deleted complete emoji and combining-character graphemes, and paged CJK and emoji output by terminal cell width.
 - Removed terminal control sequences from model output, preserved the seven prior tool aliases, and blocked vulnerable production dependency versions.
 - Made `npm pack` run tests, build runtime files, include the optional Claude Code command, and exclude compiled tests from the package.
