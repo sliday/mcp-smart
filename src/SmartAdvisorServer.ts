@@ -444,6 +444,7 @@ class CircuitBreaker {
   private config: CircuitBreakerConfig;
   private logger: Logger;
   private halfOpenCalls: number = 0;
+  private halfOpenGeneration: number = 0;
 
   constructor(config: CircuitBreakerConfig, logger: Logger, providerName: string) {
     this.config = config;
@@ -463,12 +464,13 @@ class CircuitBreaker {
     shouldCountFailure: (error: unknown) => boolean = () => true,
   ): Promise<T> {
     this.metrics.totalRequests++;
-    let halfOpenTrial = false;
+    let halfOpenTrialGeneration: number | undefined;
 
     if (this.metrics.state === CircuitBreakerState.OPEN) {
       if (this.shouldAttemptReset()) {
         this.metrics.state = CircuitBreakerState.HALF_OPEN;
         this.halfOpenCalls = 0;
+        this.halfOpenGeneration++;
         this.logger.info('Circuit breaker transitioning to HALF_OPEN state');
       } else {
         throw new SmartAdvisorError(
@@ -486,40 +488,46 @@ class CircuitBreaker {
         );
       }
       this.halfOpenCalls++;
-      halfOpenTrial = true;
+      halfOpenTrialGeneration = this.halfOpenGeneration;
     }
 
     try {
       const result = await operation();
-      this.onSuccess();
+      this.onSuccess(halfOpenTrialGeneration);
       return result;
     } catch (error) {
       if (shouldCountFailure(error)) {
-        this.onFailure();
-      } else if (halfOpenTrial && this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+        this.onFailure(halfOpenTrialGeneration);
+      } else if (halfOpenTrialGeneration === this.halfOpenGeneration && this.metrics.state === CircuitBreakerState.HALF_OPEN) {
         this.halfOpenCalls = Math.max(0, this.halfOpenCalls - 1);
       }
       throw error;
     }
   }
 
-  private onSuccess(): void {
+  private onSuccess(halfOpenTrialGeneration?: number): void {
     this.metrics.successes++;
-    this.metrics.consecutiveFailures = 0;
-    
-    if (this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+    if (halfOpenTrialGeneration === undefined) {
+      this.metrics.consecutiveFailures = 0;
+      return;
+    }
+    if (halfOpenTrialGeneration !== this.halfOpenGeneration || this.metrics.state !== CircuitBreakerState.HALF_OPEN) {
+      return;
+    }
+    this.halfOpenCalls = Math.max(0, this.halfOpenCalls - 1);
+    if (this.halfOpenCalls === 0) {
+      this.metrics.consecutiveFailures = 0;
       this.metrics.state = CircuitBreakerState.CLOSED;
-      this.halfOpenCalls = 0;
       this.logger.info('Circuit breaker reset to CLOSED state after successful recovery');
     }
   }
 
-  private onFailure(): void {
+  private onFailure(halfOpenTrialGeneration?: number): void {
     this.metrics.failures++;
     this.metrics.consecutiveFailures++;
     this.metrics.lastFailureTime = Date.now();
 
-    if (this.metrics.state === CircuitBreakerState.HALF_OPEN) {
+    if (halfOpenTrialGeneration !== undefined) {
       this.metrics.state = CircuitBreakerState.OPEN;
       this.halfOpenCalls = 0;
       this.logger.warn('Circuit breaker opened due to failure in HALF_OPEN state');
@@ -547,6 +555,7 @@ class CircuitBreaker {
     this.metrics.failures = 0;
     this.metrics.successes = 0;
     this.halfOpenCalls = 0;
+    this.halfOpenGeneration++;
     this.logger.info('Circuit breaker manually reset');
   }
 }
@@ -750,6 +759,7 @@ export class SmartAdvisorServer {
   }
 
   private checkRateLimit(clientId: string = 'default'): boolean {
+    if (this.config.rateLimitRequests === 0) return true;
     const now = Date.now();
     const clientData = this.rateLimitTracker.get(clientId);
 
@@ -1345,11 +1355,6 @@ Consider:
       status = 'degraded';
     }
     
-    // Mark as degraded if cache is at maximum capacity
-    if (status === 'healthy' && cacheSize >= this.config.maxCacheSize) {
-      status = 'degraded';
-    }
-
     return {
       status,
       timestamp: new Date().toISOString(),
