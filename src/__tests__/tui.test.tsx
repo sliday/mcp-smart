@@ -745,12 +745,20 @@ describe('Ink terminal interface', () => {
   it('renders through Ink with only the approved terminal controls', async () => {
     const instance = {waitUntilExit: vi.fn().mockResolvedValue(undefined)};
     const renderer = vi.fn().mockReturnValue(instance);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
-    await expect(runTui({render: renderer as never})).resolves.toBeUndefined();
+    try {
+      await expect(runTui({render: renderer as never})).resolves.toBeUndefined();
 
-    expect(renderer).toHaveBeenCalledWith(expect.anything(), {
-      alternateScreen: true,
-      exitOnCtrlC: false,
-    });
+      expect(renderer).toHaveBeenCalledWith(expect.anything(), {
+        alternateScreen: true,
+        exitOnCtrlC: false,
+      });
+      const app = renderer.mock.calls[0]?.[0] as React.ReactElement<{onForceExit: () => void}>;
+      app.props.onForceExit();
+      expect(exit).toHaveBeenCalledWith(130);
+    } finally {
+      exit.mockRestore();
+    }
   });
 });
