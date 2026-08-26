@@ -130,6 +130,24 @@ describe('OpenRouterClient', () => {
     }
   });
 
+  it('rejects a malformed successful response without retrying', async () => {
+    post.mockResolvedValue(response({choices: [{message: {}}]}) as never);
+    const client = new OpenRouterClient({
+      apiKey: 'key',
+      maxAttempts: 3,
+      delay: async () => undefined,
+    });
+
+    await expect(client.consult({task: 'x'})).rejects.toMatchObject({
+      details: {
+        code: 'INVALID_PROVIDER_RESPONSE',
+        message: 'OpenRouter returned an invalid response.',
+        action: 'Retry the request or choose another model.',
+      },
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [401, 'AUTHENTICATION_FAILED'],
     [402, 'INSUFFICIENT_CREDITS'],

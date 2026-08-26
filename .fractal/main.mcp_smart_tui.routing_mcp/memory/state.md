@@ -152,3 +152,10 @@ content, `{error: SmartErrorDetails}` structured content, and `isError: true`.
 The advertised consult output schema accepts either the existing success shape
 or the typed error shape, while direct public `callTool()` retains its throwing
 behavior and signature.
+
+Malformed-response RED: OpenRouter ran 16 tests with 1 failure and the server
+suite ran 11 tests with 1 failure; both accepted/cached empty answers. GREEN:
+OpenRouter 16/16 and adjacent server suites 15/15. A missing, non-string, empty,
+or whitespace-only first completion now raises single-attempt
+`INVALID_PROVIDER_RESPONSE` before receipt construction or cache insertion, so
+an identical later consultation reaches the provider again.

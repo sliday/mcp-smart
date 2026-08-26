@@ -181,6 +181,14 @@ export class OpenRouterClient {
       signal: this.options.signal,
     });
     const data = response.data;
+    const answer = data.choices?.[0]?.message?.content;
+    if (typeof answer !== 'string' || answer.trim().length === 0) {
+      throw new OpenRouterError({
+        code: 'INVALID_PROVIDER_RESPONSE',
+        message: 'OpenRouter returned an invalid response.',
+        action: 'Retry the request or choose another model.',
+      });
+    }
     const usage = data.usage;
     const receipt: ConsultationReceipt = {
       requestedModel: route.model,
@@ -200,6 +208,6 @@ export class OpenRouterClient {
     if (usage?.cost !== undefined) receipt.costUsd = usage.cost;
     if (data.fallback_used !== undefined) receipt.fallbackUsed = data.fallback_used;
 
-    return {answer: data.choices?.[0]?.message?.content ?? '', receipt};
+    return {answer, receipt};
   }
 }

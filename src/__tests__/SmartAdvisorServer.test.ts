@@ -157,4 +157,19 @@ describe('SmartAdvisorServer canonical MCP contract', () => {
       consecutiveFailures: 0,
     });
   });
+
+  it('does not cache malformed successful provider responses', async () => {
+    post
+      .mockResolvedValueOnce({data: {choices: [{message: {content: ''}}]}, headers: {}} as never)
+      .mockResolvedValueOnce(providerResponse('valid retry') as never);
+    const server = new SmartAdvisorServer();
+
+    await expect(server.callTool('consult', {task: 'same malformed task'})).rejects.toMatchObject({
+      details: {code: 'INVALID_PROVIDER_RESPONSE'},
+    });
+    await expect(server.callTool('consult', {task: 'same malformed task'})).resolves.toMatchObject({
+      structuredContent: {answer: 'valid retry'},
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+  });
 });
